@@ -1,6 +1,7 @@
+#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
-#include <linux/hidraw.h>
+#include <inttypes.h>
 #include <linux/input.h>
 #include <linux/limits.h>
 #include <stdarg.h>
@@ -10,7 +11,10 @@
 #include <string.h>
 #include <sys/ioctl.h>
 #include <sys/stat.h>
+#include <sys/types.h>
 #include <unistd.h>
+
+#define DESCRIPTOR_SIZE_MAX 4096
 
 __attribute__((format(printf, 1, 3)))
 int vmkdir(const char* pattern, int mode, ...) {
@@ -73,7 +77,7 @@ bool cp_prop_function(const char* restrict indir, const char* inpath, const char
 	return cp_prop(indir, inpath, outdir, outtmp);
 }
 
-bool create_configfs(const char* configfs, const char* syspath, const struct hidraw_devinfo* devinfo) {
+bool create_configfs(const char* configfs, const char* syspath) {
 	int outfd = -1;
 	int infd = -1;
 	char tmp[16];
@@ -92,19 +96,28 @@ bool create_configfs(const char* configfs, const char* syspath, const struct hid
 		return false;
 	}
 
-	if (!cp_prop(syspath, "../../bDeviceProtocol", configfs, "bDeviceProtocol")) {
+	if (!cp_prop(syspath, "bDeviceProtocol", configfs, "bDeviceProtocol")) {
 		return false;
 	}
-	if (!cp_prop(syspath, "../../bDeviceSubClass", configfs, "bDeviceSubClass")) {
+	if (!cp_prop(syspath, "bDeviceSubClass", configfs, "bDeviceSubClass")) {
 		return false;
 	}
-	if (!cp_prop(syspath, "../../manufacturer", configfs, "strings/0x409/manufacturer")) {
+	if (!cp_prop(syspath, "manufacturer", configfs, "strings/0x409/manufacturer")) {
 		return false;
 	}
-	if (!cp_prop(syspath, "../../product", configfs, "strings/0x409/product")) {
+	if (!cp_prop(syspath, "product", configfs, "strings/0x409/product")) {
 		return false;
 	}
-	if (!cp_prop(syspath, "../../serial", configfs, "strings/0x409/serialnumber")) {
+	if (!cp_prop(syspath, "serial", configfs, "strings/0x409/serialnumber")) {
+		return false;
+	}
+
+	infd = vopen("%s/idVendor", O_RDONLY, 0666, syspath);
+	if (infd < 0) {
+		return false;
+	}
+	if (read(infd, tmp, sizeof(tmp)) < 0) {
+		close(infd);
 		return false;
 	}
 
@@ -112,17 +125,26 @@ bool create_configfs(const char* configfs, const char* syspath, const struct hid
 	if (outfd < 0) {
 		return false;
 	}
-	dprintf(outfd, "0x%04x\n", devinfo->vendor);
+	dprintf(outfd, "0x%s", tmp);
 	close(outfd);
+
+	infd = vopen("%s/idProduct", O_RDONLY, 0666, syspath);
+	if (infd < 0) {
+		return false;
+	}
+	if (read(infd, tmp, sizeof(tmp)) < 0) {
+		close(infd);
+		return false;
+	}
 
 	outfd = vopen("%s/idProduct", O_WRONLY, 0666, configfs);
 	if (outfd < 0) {
 		return false;
 	}
-	dprintf(outfd, "0x%04x\n", devinfo->product);
+	dprintf(outfd, "0x%s", tmp);
 	close(outfd);
 
-	infd = vopen("%s/../../version", O_RDONLY, 0666, syspath);
+	infd = vopen("%s/version", O_RDONLY, 0666, syspath);
 	if (infd < 0) {
 		return false;
 	}
@@ -157,109 +179,127 @@ bool create_configfs(const char* configfs, const char* syspath, const struct hid
 	return true;
 }
 
-bool create_configfs_function(const char* configfs, const char* syspath, const struct hidraw_report_descriptor* desc, int fn) {
+bool create_configfs_function(const char* configfs, const char* syspath, int fn) {
+	char function[PATH_MAX];
+	char interface[PATH_MAX];
+	char report_descriptor[DESCRIPTOR_SIZE_MAX];
+	int infd;
 	int outfd = -1;
+	DIR* dir;
+	struct dirent* dent;
+	ssize_t desc_size;
 
-	if (vmkdir("%s/functions/hid.usb%d", 0755, configfs, fn) == -1 && errno != -EEXIST) {
+	snprintf(function, sizeof(function), "%s/functions/hid.usb%d", configfs, fn);
+	if (mkdir(function, 0755) == -1 && errno != -EEXIST) {
 		return false;
 	}
 
-	if (!cp_prop_function(syspath, "../bInterfaceProtocol", configfs, "functions/hid.usb%d/protocol", fn)) {
+	if (!cp_prop(syspath, "bInterfaceProtocol", function, "protocol")) {
 		return false;
 	}
-	if (!cp_prop_function(syspath, "../bInterfaceSubClass", configfs, "functions/hid.usb%d/subclass", fn)) {
+	if (!cp_prop(syspath, "bInterfaceSubClass", function, "subclass")) {
 		return false;
 	}
 
-	outfd = vopen("%s/functions/hid.usb%d/report_length", O_WRONLY | O_TRUNC, 0666, configfs, fn);
+	dir = opendir(syspath);
+	if (!dir) {
+		return false;
+	}
+
+	while ((dent = readdir(dir))) {
+		if (dent->d_type != DT_DIR) {
+			continue;
+		}
+		if (strncmp(dent->d_name, "0003:", 5) == 0) {
+			snprintf(interface, sizeof(interface), "%s/%s", syspath, dent->d_name);
+			break;
+		}
+	}
+	closedir(dir);
+	if (!dent) {
+		return false;
+	}
+	infd = vopen("%s/report_descriptor", O_RDONLY, 0666, interface);
+	if (infd < 0) {
+		return false;
+	}
+
+	desc_size = read(infd, report_descriptor, sizeof(report_descriptor));
+	if (desc_size <= 0) {
+		return false;
+	}
+
+	outfd = vopen("%s/report_length", O_WRONLY | O_TRUNC, 0666, function);
 	if (outfd < 0) {
 		return false;
 	}
-	dprintf(outfd, "%02x", desc->size);
+	dprintf(outfd, "%02" PRIxPTR, desc_size);
 	close(outfd);
 
-	outfd = vopen("%s/functions/hid.usb%d/report_desc", O_WRONLY | O_TRUNC, 0666, configfs, fn);
+	outfd = vopen("%s/report_desc", O_WRONLY | O_TRUNC, 0666, function);
 	if (outfd < 0) {
 		return false;
 	}
-	if (write(outfd, desc->value, desc->size) != desc->size) {
+	if (write(outfd, report_descriptor, desc_size) != desc_size) {
 		close(outfd);
 		return false;
 	}
 	close(outfd);
+
+	snprintf(interface, sizeof(interface), "%s/configs/c.1/hid.usb%d", configfs, fn);
+	symlink(function, interface);
 
 	return true;
 }
 
 
 int main(int argc, char* argv[]) {
-	int hidraw;
-	struct hidraw_report_descriptor desc;
-	struct hidraw_devinfo devinfo;
 	char syspath[PATH_MAX];
 	char syspath_tmp[PATH_MAX];
 	char configfs[PATH_MAX];
+	char tmp[16];
+	const char* bus_id;
+	int fd;
+	unsigned max_interfaces;
+	unsigned i;
 
 	if (argc < 3) {
 		return 0;
 	}
-	if (strncmp(argv[1], "/dev/hidraw", strlen("/dev/hidraw")) != 0) {
-		return 1;
-	}
+	bus_id = argv[1];
 
 	/* Resolve paths to sysfs nodes */
-	snprintf(syspath_tmp, sizeof(syspath_tmp), "/sys/class/hidraw/%s", &argv[1][5]);
+	snprintf(syspath_tmp, sizeof(syspath_tmp), "/sys/bus/usb/devices/%s", bus_id);
 	if (realpath(syspath_tmp, syspath) == NULL) {
 		return 1;
-	}
-	snprintf(syspath_tmp, sizeof(syspath_tmp), "%s/../..", syspath);
-	if (realpath(syspath_tmp, syspath) == NULL) {
-		return 1;
-	}
-
-	/* Get info about the hidraw and descriptors */
-	hidraw = open(argv[1], O_RDONLY);
-	if (hidraw < 0) {
-		return 1;
-	}
-	if (ioctl(hidraw, HIDIOCGRDESCSIZE, &desc.size) == -1) {
-		goto shutdown;
-	}
-
-	if (ioctl(hidraw, HIDIOCGRDESC, &desc) == -1) {
-		goto shutdown;
-	}
-
-	if (ioctl(hidraw, HIDIOCGRAWINFO, &devinfo) == -1) {
-		goto shutdown;
 	}
 
 	/* Create node using configfs */
 	snprintf(configfs, sizeof(configfs), "/sys/kernel/config/usb_gadget/%s", argv[2]);
-	if (!create_configfs(configfs, syspath, &devinfo)) {
+	if (!create_configfs(configfs, syspath)) {
 		goto shutdown;
 	}
-	if (!create_configfs_function(configfs, syspath, &desc, 0)) {
+
+	fd = vopen("%s/bNumInterfaces", O_RDONLY, 0666, syspath);
+	if (fd < 0) {
 		goto shutdown;
+	}
+	if (read(fd, tmp, sizeof(tmp)) < 0) {
+		goto shutdown;
+	}
+	max_interfaces = strtoul(tmp, NULL, 10);
+	for (i = 0; i < max_interfaces; ++i) {
+		snprintf(syspath_tmp, sizeof(syspath_tmp), "%s/%s:1.%u", syspath, bus_id, i);
+		if (!create_configfs_function(configfs, syspath_tmp, i)) {
+			goto shutdown;
+		}
 	}
 
 	/* Drop privileges */
 	/* TODO */
-	printf("%s (%02x %04x:%04x) desc size %d\n", syspath, devinfo.bustype, devinfo.vendor, devinfo.product, desc.size);
-	unsigned i;
-	for (i = 0; i < desc.size; ++i) {
-		printf("%02x", desc.value[i]);
-		if ((i & 15) == 15) {
-			putchar('\n');
-		} else if ((i & 1) == 1) {
-			putchar(' ');
-		}
-	}
-	if ((desc.size & 15) != 15) {
-		putchar('\n');
-	}
+	return 0;
 
 shutdown:
-	close(hidraw);
-	return 0;
+	rmdir(configfs);
+	return 1;
 }
