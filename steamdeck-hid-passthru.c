@@ -1,3 +1,4 @@
+#include <ctype.h>
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -119,6 +120,7 @@ bool create_configfs(const char* configfs, const char* syspath) {
 	int outfd = -1;
 	int infd = -1;
 	char tmp[16];
+	size_t i;
 
 	if (mkdir(configfs, 0755) == -1 && errno != -EEXIST) {
 		return false;
@@ -147,6 +149,9 @@ bool create_configfs(const char* configfs, const char* syspath) {
 		return false;
 	}
 	if (!cp_prop(syspath, "serial", configfs, "strings/0x409/serialnumber")) {
+		return false;
+	}
+	if (!cp_prop(syspath, "configuration", configfs, "configs/c.1/strings/0x409/configuration")) {
 		return false;
 	}
 
@@ -185,11 +190,35 @@ bool create_configfs(const char* configfs, const char* syspath) {
 	write(outfd, tmp, 7);
 	close(outfd);
 
-	outfd = vopen("%s/configs/c.1/strings/0x409/configuration", O_WRONLY | O_TRUNC, 0666, configfs);
+	infd = vopen("%s/bMaxPower", O_RDONLY, 0666, syspath);
+	if (infd < 0) {
+		return false;
+	}
+	if (read(infd, tmp, sizeof(tmp)) < 0) {
+		close(infd);
+		return false;
+	}
+	close(infd);
+	/* Chop off units */
+	for (i = 0; i < sizeof(tmp) - 1; ++i) {
+		if (isdigit(tmp[i])) {
+			continue;
+		}
+		if (tmp[i] == 'm') {
+			tmp[i] = '\n';
+			tmp[i + 1] = '\0';
+			break;
+		}
+		return false;
+	}
+	if (i == sizeof(tmp) - 1) {
+		return false;
+	}
+	outfd = vopen("%s/configs/c.1/MaxPower", O_WRONLY, 0666, configfs);
 	if (outfd < 0) {
 		return false;
 	}
-	dprintf(outfd, "Configuration 1\n");
+	write(outfd, tmp, strlen(tmp));
 	close(outfd);
 
 	return true;
@@ -291,19 +320,20 @@ int main(int argc, char* argv[]) {
 	}
 
 	/* Create node using configfs */
+	fd = vopen("%s/bNumInterfaces", O_RDONLY, 0666, syspath);
+	if (fd < 0) {
+		return 1;
+	}
+	if (read(fd, tmp, sizeof(tmp)) < 0) {
+		return 1;
+	}
+	max_interfaces = strtoul(tmp, NULL, 10);
+
 	snprintf(configfs, sizeof(configfs), "/sys/kernel/config/usb_gadget/%s", argv[2]);
 	if (!create_configfs(configfs, syspath)) {
 		goto shutdown;
 	}
 
-	fd = vopen("%s/bNumInterfaces", O_RDONLY, 0666, syspath);
-	if (fd < 0) {
-		goto shutdown;
-	}
-	if (read(fd, tmp, sizeof(tmp)) < 0) {
-		goto shutdown;
-	}
-	max_interfaces = strtoul(tmp, NULL, 10);
 	for (i = 0; i < max_interfaces; ++i) {
 		snprintf(syspath_tmp, sizeof(syspath_tmp), "%s/%s:1.%u", syspath, bus_id, i);
 		if (!create_configfs_function(configfs, syspath_tmp, i)) {
