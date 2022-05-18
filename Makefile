@@ -1,6 +1,6 @@
 all: steamdeck-hid-passthru
 
-CFLAGS += -Wall -Wextra -Werror -Wno-format-truncation
+CFLAGS += -Wall -Wextra -Werror -Wno-format-truncation -Wno-stringop-overflow
 .PHONY: clean
 
 clean:

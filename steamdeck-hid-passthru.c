@@ -3,19 +3,18 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <inttypes.h>
-#include <linux/input.h>
-#include <linux/limits.h>
+#include <poll.h>
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/ioctl.h>
 #include <sys/stat.h>
-#include <sys/types.h>
+#include <sys/sysmacros.h>
 #include <unistd.h>
 
 #define DESCRIPTOR_SIZE_MAX 4096
+#define INTERFACES_MAX 16
 
 __attribute__((format(printf, 1, 3)))
 int vmkdir(const char* pattern, int mode, ...) {
@@ -224,14 +223,33 @@ bool create_configfs(const char* configfs, const char* syspath) {
 	return true;
 }
 
+bool find_function(const char* syspath, char* function, size_t function_size) {
+	DIR* dir;
+	struct dirent* dent;
+	dir = opendir(syspath);
+	if (!dir) {
+		return false;
+	}
+
+	while ((dent = readdir(dir))) {
+		if (dent->d_type != DT_DIR) {
+			continue;
+		}
+		if (strncmp(dent->d_name, "0003:", 5) == 0) {
+			snprintf(function, function_size, "%s/%s", syspath, dent->d_name);
+			break;
+		}
+	}
+	closedir(dir);
+	return !!dent;
+}
+
 bool create_configfs_function(const char* configfs, const char* syspath, int fn) {
 	char function[PATH_MAX];
 	char interface[PATH_MAX];
 	char report_descriptor[DESCRIPTOR_SIZE_MAX];
 	int infd;
 	int outfd = -1;
-	DIR* dir;
-	struct dirent* dent;
 	ssize_t desc_size;
 
 	snprintf(function, sizeof(function), "%s/functions/hid.usb%d", configfs, fn);
@@ -246,22 +264,7 @@ bool create_configfs_function(const char* configfs, const char* syspath, int fn)
 		return false;
 	}
 
-	dir = opendir(syspath);
-	if (!dir) {
-		return false;
-	}
-
-	while ((dent = readdir(dir))) {
-		if (dent->d_type != DT_DIR) {
-			continue;
-		}
-		if (strncmp(dent->d_name, "0003:", 5) == 0) {
-			snprintf(interface, sizeof(interface), "%s/%s", syspath, dent->d_name);
-			break;
-		}
-	}
-	closedir(dir);
-	if (!dent) {
+	if (!find_function(syspath, interface, sizeof(interface))) {
 		return false;
 	}
 	infd = vopen("%s/report_descriptor", O_RDONLY, 0666, interface);
@@ -297,6 +300,113 @@ bool create_configfs_function(const char* configfs, const char* syspath, int fn)
 	return true;
 }
 
+int find_dev_node(unsigned nod_major, unsigned nod_minor, const char* prefix) {
+	char nod_path[PATH_MAX];
+	DIR* dir;
+	struct dirent* dent;
+	struct stat nod;
+	dir = opendir("/dev");
+	if (!dir) {
+		return -1;
+	}
+
+	while ((dent = readdir(dir))) {
+		if (dent->d_type != DT_CHR) {
+			continue;
+		}
+		if (strncmp(dent->d_name, prefix, strlen(prefix)) != 0) {
+			continue;
+		}
+		snprintf(nod_path, sizeof(nod_path), "/dev/%s", dent->d_name);
+		if (stat(nod_path, &nod) < 0) {
+			return -1;
+		}
+		if (major(nod.st_rdev) == nod_major && minor(nod.st_rdev) == nod_minor) {
+			closedir(dir);
+			return open(nod_path, O_RDWR, 0666);
+		}
+	}
+	closedir(dir);
+	return -1;
+}
+
+int find_dev(const char* file, const char* class) {
+	char tmp[16];
+	char* parse_tmp;
+	unsigned nod_major;
+	unsigned nod_minor;
+
+	int fd = open(file, O_RDONLY);
+	if (fd < 0) {
+		return -1;
+	}
+	if (read(fd, tmp, sizeof(tmp)) < 3) {
+		close(fd);
+		return -1;
+	}
+	close(fd);
+	nod_major = strtoul(tmp, &parse_tmp, 10);
+	if (!parse_tmp || parse_tmp[0] != ':') {
+		return -1;
+	}
+	nod_minor = strtoul(&parse_tmp[1], NULL, 10);
+	if (!parse_tmp) {
+		return -1;
+	}
+	return find_dev_node(nod_major, nod_minor, class);
+}
+
+int find_hidraw(const char* syspath) {
+	char function[PATH_MAX];
+	char filename[PATH_MAX];
+	DIR* dir;
+	struct dirent* dent;
+
+	if (!find_function(syspath, function, sizeof(function))) {
+		return -1;
+	}
+	strncat(function, "/hidraw", sizeof(function));
+	dir = opendir(function);
+	if (!dir) {
+		return -1;
+	}
+
+	while ((dent = readdir(dir))) {
+		if (dent->d_type != DT_DIR) {
+			continue;
+		}
+		if (strncmp(dent->d_name, "hidraw", 6) == 0) {
+			snprintf(filename, sizeof(filename), "%s/%s/dev", function, dent->d_name);
+			break;
+		}
+	}
+	if (!dent) {
+		closedir(dir);
+		return -1;
+	}
+	closedir(dir);
+	return find_dev(filename, "hidraw");
+}
+
+bool start_udc(const char* configfs, const char* udc) {
+	int fd = vopen("%s/UDC", O_WRONLY | O_TRUNC, 0644, configfs);
+	if (fd < 0) {
+		return false;
+	}
+	dprintf(fd, "%s\n", udc);
+	close(fd);
+	return true;
+}
+
+bool stop_udc(const char* configfs) {
+	int fd = vopen("%s/UDC", O_WRONLY | O_TRUNC, 0644, configfs);
+	if (fd < 0) {
+		return false;
+	}
+	write(fd, "\n", 1);
+	close(fd);
+	return true;
+}
 
 int main(int argc, char* argv[]) {
 	char syspath[PATH_MAX];
@@ -305,10 +415,13 @@ int main(int argc, char* argv[]) {
 	char tmp[16];
 	const char* bus_id;
 	int fd;
+	int hidg[INTERFACES_MAX];
+	int hidraw[INTERFACES_MAX];
 	unsigned max_interfaces = 0;
 	unsigned i;
+	int ok = 1;
 
-	if (argc < 3) {
+	if (argc != 4) {
 		return 0;
 	}
 	bus_id = argv[1];
@@ -341,11 +454,40 @@ int main(int argc, char* argv[]) {
 		}
 	}
 
+	if (!start_udc(configfs, argv[3])) {
+		goto shutdown;
+	}
+
+	for (i = 0; i < max_interfaces && i < INTERFACES_MAX; ++i) {
+		snprintf(syspath_tmp, sizeof(syspath_tmp), "%s/functions/hid.usb%u/dev", configfs, i);
+		hidg[i] = find_dev(syspath_tmp, "hidg");
+		snprintf(syspath_tmp, sizeof(syspath_tmp), "%s/%s:1.%u", syspath, bus_id, i);
+		hidraw[i] = find_hidraw(syspath_tmp);
+		if (hidg[i] < 0 || hidraw[i] < 0) {
+			if (i + 1 < INTERFACES_MAX) {
+				hidg[i + 1] = -1;
+				hidraw[i + 1] = -1;
+			}
+			for (i = 0; hidg[i] != -1; ++i) {
+				close(hidg[i]);
+			}
+			for (i = 0; hidraw[i] != -1; ++i) {
+				close(hidraw[i]);
+			}
+			goto shutdown;
+		}
+	}
+
 	/* Drop privileges */
 	/* TODO */
-	return 0;
+	ok = 0;
+	for (i = 0; i < max_interfaces && i < INTERFACES_MAX; ++i) {
+		close(hidg[i]);
+		close(hidraw[i]);
+	}
 
 shutdown:
+	stop_udc(configfs);
 	snprintf(syspath_tmp, sizeof(syspath_tmp), "%s/strings/0x409", configfs);
 	rmdir(syspath_tmp);
 	snprintf(syspath_tmp, sizeof(syspath_tmp), "%s/configs/c.1/strings/0x409", configfs);
@@ -359,5 +501,5 @@ shutdown:
 	snprintf(syspath_tmp, sizeof(syspath_tmp), "%s/configs/c.1", configfs);
 	rmdir(syspath_tmp);
 	rmdir(configfs);
-	return 1;
+	return ok;
 }
