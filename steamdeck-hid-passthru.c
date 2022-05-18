@@ -289,7 +289,7 @@ bool create_configfs_function(const char* configfs, const char* syspath, int fn)
 	if (outfd < 0) {
 		return false;
 	}
-	dprintf(outfd, "%02" PRIxPTR, desc_size);
+	dprintf(outfd, "%02i", 64); // TODO
 	close(outfd);
 
 	outfd = vopen("%s/report_desc", O_WRONLY | O_TRUNC, 0666, function);
@@ -417,7 +417,7 @@ bool stop_udc(const char* configfs) {
 }
 
 bool poll_fds(int* infds, int* outfds, nfds_t nfds) {
-	struct pollfd fds[INTERFACES_MAX];
+	struct pollfd fds[INTERFACES_MAX * 2];
 	uint8_t buffer[REPORT_SIZE_MAX];
 	ssize_t sizein;
 	ssize_t sizeout;
@@ -425,27 +425,29 @@ bool poll_fds(int* infds, int* outfds, nfds_t nfds) {
 	nfds_t i;
 
 	for (i = 0; i < nfds; ++i) {
-		fds[i].fd = infds[i];
-		fds[i].events = POLLIN;
+		fds[i * 2].fd = infds[i];
+		fds[i * 2].events = POLLIN;
+		fds[i * 2 + 1].fd = outfds[i];
+		fds[i * 2 + 1].events = POLLIN;
 	}
 
 	while (true) {
-		int ret = poll(fds, nfds, -1);
+		int ret = poll(fds, nfds * 2, -1);
 		if (ret == -EAGAIN) {
 			continue;
 		}
 		if (ret < 0) {
 			return ret == -EINTR;
 		}
-		for (i = 0; i < nfds; ++i) {
+		for (i = 0; i < nfds * 2; ++i) {
 			if (fds[i].revents & POLLIN) {
-				sizein = read(infds[i], buffer, sizeof(buffer));
+				sizein = read(fds[i].fd, buffer, sizeof(buffer));
 				if (sizein < 0) {
 					return false;
 				}
 				loc = 0;
 				while (sizein > 0) {
-					sizeout = write(outfds[i], &buffer[loc], sizein);
+					sizeout = write(fds[i ^ 1].fd, &buffer[loc], sizein);
 					if (sizeout < 0) {
 						return false;
 					}
