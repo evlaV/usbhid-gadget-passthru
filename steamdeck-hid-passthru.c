@@ -4,6 +4,7 @@
 #include <fcntl.h>
 #include <inttypes.h>
 #include <poll.h>
+#include <signal.h>
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -14,7 +15,14 @@
 #include <unistd.h>
 
 #define DESCRIPTOR_SIZE_MAX 4096
+#define REPORT_SIZE_MAX 4096
 #define INTERFACES_MAX 16
+
+bool did_hup = false;
+
+void hup() {
+	did_hup = true;
+}
 
 __attribute__((format(printf, 1, 3)))
 int vmkdir(const char* pattern, int mode, ...) {
@@ -408,6 +416,51 @@ bool stop_udc(const char* configfs) {
 	return true;
 }
 
+bool poll_fds(int* infds, int* outfds, nfds_t nfds) {
+	struct pollfd fds[INTERFACES_MAX];
+	uint8_t buffer[REPORT_SIZE_MAX];
+	ssize_t sizein;
+	ssize_t sizeout;
+	ssize_t loc;
+	nfds_t i;
+
+	for (i = 0; i < nfds; ++i) {
+		fds[i].fd = infds[i];
+		fds[i].events = POLLIN;
+	}
+
+	while (true) {
+		int ret = poll(fds, nfds, -1);
+		if (ret == -EAGAIN) {
+			continue;
+		}
+		if (ret < 0) {
+			return ret == -EINTR;
+		}
+		for (i = 0; i < nfds; ++i) {
+			if (fds[i].revents & POLLIN) {
+				sizein = read(infds[i], buffer, sizeof(buffer));
+				if (sizein < 0) {
+					return false;
+				}
+				loc = 0;
+				while (sizein > 0) {
+					sizeout = write(outfds[i], &buffer[loc], sizein);
+					if (sizeout < 0) {
+						return false;
+					}
+					loc += sizeout;
+					sizein -= sizeout;
+				}
+				fds[i].revents &= ~POLLIN;
+			}
+			if (fds[i].revents & (POLLERR | POLLHUP | POLLNVAL)) {
+				return false;
+			}
+		}
+	}
+}
+
 int main(int argc, char* argv[]) {
 	char syspath[PATH_MAX];
 	char syspath_tmp[PATH_MAX];
@@ -419,6 +472,7 @@ int main(int argc, char* argv[]) {
 	int hidraw[INTERFACES_MAX];
 	unsigned max_interfaces = 0;
 	unsigned i;
+	struct sigaction sa;
 	int ok = 1;
 
 	if (argc != 4) {
@@ -441,6 +495,13 @@ int main(int argc, char* argv[]) {
 		return 1;
 	}
 	max_interfaces = strtoul(tmp, NULL, 10);
+
+	/* We want to exit cleanly in event of SIGINT or SIGHUP */
+	sigemptyset(&sa.sa_mask);
+	sa.sa_handler = hup;
+	sa.sa_flags = 0;
+	sigaction(SIGINT, &sa, NULL);
+	sigaction(SIGHUP, &sa, NULL);
 
 	snprintf(configfs, sizeof(configfs), "/sys/kernel/config/usb_gadget/%s", argv[2]);
 	if (!create_configfs(configfs, syspath)) {
@@ -478,9 +539,12 @@ int main(int argc, char* argv[]) {
 		}
 	}
 
-	/* Drop privileges */
-	/* TODO */
-	ok = 0;
+	if (did_hup) {
+		goto shutdown;
+	}
+
+	ok = !poll_fds(hidraw, hidg, i);
+
 	for (i = 0; i < max_interfaces && i < INTERFACES_MAX; ++i) {
 		close(hidg[i]);
 		close(hidraw[i]);
