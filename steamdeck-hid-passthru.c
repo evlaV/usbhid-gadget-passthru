@@ -71,10 +71,48 @@ bool cp_prop(const char* restrict indir, const char* inpath, const char* restric
 	return true;
 }
 
-bool cp_prop_function(const char* restrict indir, const char* inpath, const char* restrict outdir, const char* outpath, int fn) {
-	char outtmp[PATH_MAX];
-	snprintf(outtmp, sizeof(outtmp), outpath, fn);
-	return cp_prop(indir, inpath, outdir, outtmp);
+bool cp_prop_hex(const char* restrict indir, const char* inpath, const char* restrict outdir, const char* outpath) {
+	char in[PATH_MAX];
+	char out[PATH_MAX];
+	char buf[2048];
+	ssize_t size;
+	int infd = -1;
+	int outfd = -1;
+
+	snprintf(in, sizeof(in), "%s/%s", indir, inpath);
+	snprintf(out, sizeof(out), "%s/%s", outdir, outpath);
+	infd = open(in, O_RDONLY);
+	outfd = open(out, O_WRONLY | O_TRUNC, 0644);
+
+	if (infd < 0) {
+		close(outfd);
+		return false;
+	}
+
+	if (outfd < 0) {
+		close(infd);
+		return false;
+	}
+
+	buf[0] = '0';
+	buf[1] = 'x';
+	size = read(infd, &buf[2], sizeof(buf) - 2);
+	if (size < 1) {
+		close(infd);
+		close(outfd);
+		return false;
+	}
+	size += 2;
+
+	if (write(outfd, buf, size) != size) {
+		close(infd);
+		close(outfd);
+		return false;
+	}
+
+	close(infd);
+	close(outfd);
+	return true;
 }
 
 bool create_configfs(const char* configfs, const char* syspath) {
@@ -112,37 +150,15 @@ bool create_configfs(const char* configfs, const char* syspath) {
 		return false;
 	}
 
-	infd = vopen("%s/idVendor", O_RDONLY, 0666, syspath);
-	if (infd < 0) {
+	if (!cp_prop_hex(syspath, "idVendor", configfs, "idVendor")) {
 		return false;
 	}
-	if (read(infd, tmp, sizeof(tmp)) < 0) {
-		close(infd);
+	if (!cp_prop_hex(syspath, "idProduct", configfs, "idProduct")) {
 		return false;
 	}
-
-	outfd = vopen("%s/idVendor", O_WRONLY, 0666, configfs);
-	if (outfd < 0) {
+	if (!cp_prop_hex(syspath, "bcdDevice", configfs, "bcdDevice")) {
 		return false;
 	}
-	dprintf(outfd, "0x%s", tmp);
-	close(outfd);
-
-	infd = vopen("%s/idProduct", O_RDONLY, 0666, syspath);
-	if (infd < 0) {
-		return false;
-	}
-	if (read(infd, tmp, sizeof(tmp)) < 0) {
-		close(infd);
-		return false;
-	}
-
-	outfd = vopen("%s/idProduct", O_WRONLY, 0666, configfs);
-	if (outfd < 0) {
-		return false;
-	}
-	dprintf(outfd, "0x%s", tmp);
-	close(outfd);
 
 	infd = vopen("%s/version", O_RDONLY, 0666, syspath);
 	if (infd < 0) {
@@ -260,7 +276,7 @@ int main(int argc, char* argv[]) {
 	char tmp[16];
 	const char* bus_id;
 	int fd;
-	unsigned max_interfaces;
+	unsigned max_interfaces = 0;
 	unsigned i;
 
 	if (argc < 3) {
@@ -300,6 +316,18 @@ int main(int argc, char* argv[]) {
 	return 0;
 
 shutdown:
+	snprintf(syspath_tmp, sizeof(syspath_tmp), "%s/strings/0x409", configfs);
+	rmdir(syspath_tmp);
+	snprintf(syspath_tmp, sizeof(syspath_tmp), "%s/configs/c.1/strings/0x409", configfs);
+	rmdir(syspath_tmp);
+	for (i = 0; i < max_interfaces; ++i) {
+		snprintf(syspath_tmp, sizeof(syspath_tmp), "%s/configs/c.1/hid.usb%u", configfs, i);
+		unlink(syspath_tmp);
+		snprintf(syspath_tmp, sizeof(syspath_tmp), "%s/functions/hid.usb%u", configfs, i);
+		rmdir(syspath_tmp);
+	}
+	snprintf(syspath_tmp, sizeof(syspath_tmp), "%s/configs/c.1", configfs);
+	rmdir(syspath_tmp);
 	rmdir(configfs);
 	return 1;
 }
