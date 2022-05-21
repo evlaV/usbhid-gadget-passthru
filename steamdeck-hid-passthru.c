@@ -129,17 +129,17 @@ bool create_configfs(const char* configfs, const char* syspath) {
 	char tmp[16];
 	size_t i;
 
-	if (mkdir(configfs, 0755) == -1 && errno != -EEXIST) {
+	if (mkdir(configfs, 0755) == -1 && errno != EEXIST) {
 		return false;
 	}
 
-	if (vmkdir("%s/configs/c.1", 0755, configfs) == -1 && errno != -EEXIST) {
+	if (vmkdir("%s/configs/c.1", 0755, configfs) == -1 && errno != EEXIST) {
 		return false;
 	}
-	if (vmkdir("%s/strings/0x409", 0755, configfs) == -1 && errno != -EEXIST) {
+	if (vmkdir("%s/strings/0x409", 0755, configfs) == -1 && errno != EEXIST) {
 		return false;
 	}
-	if (vmkdir("%s/configs/c.1/strings/0x409", 0755, configfs) == -1 && errno != -EEXIST) {
+	if (vmkdir("%s/configs/c.1/strings/0x409", 0755, configfs) == -1 && errno != EEXIST) {
 		return false;
 	}
 
@@ -261,7 +261,7 @@ bool create_configfs_function(const char* configfs, const char* syspath, int fn)
 	ssize_t desc_size;
 
 	snprintf(function, sizeof(function), "%s/functions/hid.usb%d", configfs, fn);
-	if (mkdir(function, 0755) == -1 && errno != -EEXIST) {
+	if (mkdir(function, 0755) == -1 && errno != EEXIST) {
 		return false;
 	}
 
@@ -437,19 +437,19 @@ bool poll_fds(int* infds, int* outfds, nfds_t nfds) {
 			continue;
 		}
 		if (ret < 0) {
-			return ret == -EINTR;
+			return did_hup;
 		}
 		for (i = 0; i < nfds * 2; ++i) {
 			if (fds[i].revents & POLLIN) {
 				sizein = read(fds[i].fd, buffer, sizeof(buffer));
 				if (sizein < 0) {
-					return false;
+					return did_hup;
 				}
 				loc = 0;
 				while (sizein > 0) {
 					sizeout = write(fds[i ^ 1].fd, &buffer[loc], sizein);
 					if (sizeout < 0) {
-						return false;
+						return did_hup;
 					}
 					loc += sizeout;
 					sizein -= sizeout;
@@ -457,7 +457,7 @@ bool poll_fds(int* infds, int* outfds, nfds_t nfds) {
 				fds[i].revents &= ~POLLIN;
 			}
 			if (fds[i].revents & (POLLERR | POLLHUP | POLLNVAL)) {
-				return false;
+				return did_hup;
 			}
 		}
 	}
