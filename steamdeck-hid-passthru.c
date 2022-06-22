@@ -3,6 +3,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <inttypes.h>
+#include <linux/hidraw.h>
 #include <poll.h>
 #include <signal.h>
 #include <stdarg.h>
@@ -10,6 +11,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/ioctl.h>
 #include <sys/stat.h>
 #include <sys/sysmacros.h>
 #include <unistd.h>
@@ -17,6 +19,14 @@
 #define DESCRIPTOR_SIZE_MAX 4096
 #define REPORT_SIZE_MAX 4096
 #define INTERFACES_MAX 16
+
+struct usb_hidg_report {
+	uint16_t length;
+	uint8_t data[512];
+};
+
+#define GADGET_HID_READ_SET_REPORT	_IOR('g', 0x41, struct usb_hidg_report)
+#define GADGET_HID_WRITE_GET_REPORT	_IOW('g', 0x42, struct usb_hidg_report)
 
 bool did_hup = false;
 
@@ -422,16 +432,18 @@ bool poll_fds(int* infds, int* outfds, nfds_t nfds) {
 	ssize_t sizein;
 	ssize_t sizeout;
 	ssize_t loc;
+	struct usb_hidg_report set_report;
+	struct usb_hidg_report get_report;
 	nfds_t i;
 
 	for (i = 0; i < nfds; ++i) {
 		fds[i * 2].fd = infds[i];
 		fds[i * 2].events = POLLIN;
 		fds[i * 2 + 1].fd = outfds[i];
-		fds[i * 2 + 1].events = POLLIN;
+		fds[i * 2 + 1].events = POLLIN | POLLPRI;
 	}
 
-	while (true) {
+	while (!did_hup) {
 		int ret = poll(fds, nfds * 2, -1);
 		if (ret == -EAGAIN) {
 			continue;
@@ -440,6 +452,23 @@ bool poll_fds(int* infds, int* outfds, nfds_t nfds) {
 			return did_hup;
 		}
 		for (i = 0; i < nfds * 2; ++i) {
+			if (fds[i].revents & POLLPRI) {
+				if (ioctl(fds[i].fd, GADGET_HID_READ_SET_REPORT, &set_report) < 0) {
+					perror("SET ioctl in failed");
+				}
+				if (ioctl(fds[i ^ 1].fd, HIDIOCSFEATURE(set_report.length), set_report.data) < 0) {
+					perror("SET ioctl out failed");
+				}
+				get_report.data[0] = set_report.data[0];
+				if (ioctl(fds[i ^ 1].fd, HIDIOCGFEATURE(64), get_report.data) < 0) {
+					perror("GET ioctl in failed");
+				}
+				if (get_report.data[0] == set_report.data[0] && ioctl(fds[i].fd, GADGET_HID_WRITE_GET_REPORT, &get_report) < 0) {
+					perror("GET ioctl out failed");
+				}
+				memset(get_report.data, 0, sizeof(get_report.data));
+				fds[i].revents &= ~POLLPRI;
+			}
 			if (fds[i].revents & POLLIN) {
 				sizein = read(fds[i].fd, buffer, sizeof(buffer));
 				if (sizein < 0) {
@@ -461,6 +490,7 @@ bool poll_fds(int* infds, int* outfds, nfds_t nfds) {
 			}
 		}
 	}
+	return true;
 }
 
 int main(int argc, char* argv[]) {
