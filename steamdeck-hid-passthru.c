@@ -11,6 +11,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/fcntl.h>
 #include <sys/ioctl.h>
 #include <sys/stat.h>
 #include <sys/sysmacros.h>
@@ -433,7 +434,7 @@ bool poll_fds(int* infds, int* outfds, nfds_t nfds) {
 	ssize_t sizeout;
 	ssize_t loc;
 	struct usb_hidg_report set_report;
-	struct usb_hidg_report get_report;
+	struct usb_hidg_report get_report = { 64, { 0 } };
 	nfds_t i;
 
 	for (i = 0; i < nfds; ++i) {
@@ -478,6 +479,9 @@ bool poll_fds(int* infds, int* outfds, nfds_t nfds) {
 				while (sizein > 0) {
 					sizeout = write(fds[i ^ 1].fd, &buffer[loc], sizein);
 					if (sizeout < 0) {
+						if (errno == EAGAIN) {
+							break;
+						}
 						return did_hup;
 					}
 					loc += sizeout;
@@ -502,6 +506,7 @@ int main(int argc, char* argv[]) {
 	int fd;
 	int hidg[INTERFACES_MAX];
 	int hidraw[INTERFACES_MAX];
+	int ret;
 	unsigned max_interfaces = 0;
 	unsigned i;
 	struct sigaction sa;
@@ -554,6 +559,11 @@ int main(int argc, char* argv[]) {
 	for (i = 0; i < max_interfaces && i < INTERFACES_MAX; ++i) {
 		snprintf(syspath_tmp, sizeof(syspath_tmp), "%s/functions/hid.usb%u/dev", configfs, i);
 		hidg[i] = find_dev(syspath_tmp, "hidg");
+		ret = fcntl(hidg[i], F_GETFL, 0);
+		if (ret < 0) {
+			goto shutdown;
+		}
+		fcntl(hidg[i], F_SETFL, ret | FNONBLOCK);
 		snprintf(syspath_tmp, sizeof(syspath_tmp), "%s/%s:1.%u", syspath, bus_id, i);
 		hidraw[i] = find_hidraw(syspath_tmp);
 		if (hidg[i] < 0 || hidraw[i] < 0) {
