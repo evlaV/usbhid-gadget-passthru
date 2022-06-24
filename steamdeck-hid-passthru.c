@@ -69,17 +69,20 @@ bool cp_prop(const char* restrict indir, const char* inpath, const char* restric
 	outfd = open(out, O_WRONLY | O_TRUNC, 0644);
 
 	if (infd < 0) {
+		perror("Failed to open property input");
 		close(outfd);
 		return false;
 	}
 
 	if (outfd < 0) {
+		perror("Failed to open property output");
 		close(infd);
 		return false;
 	}
 
 	while ((size = read(infd, buf, sizeof(buf))) > 0) {
 		if (write(outfd, buf, size) != size) {
+			perror("Failed to copy property");
 			close(infd);
 			close(outfd);
 			return false;
@@ -104,11 +107,13 @@ bool cp_prop_hex(const char* restrict indir, const char* inpath, const char* res
 	outfd = open(out, O_WRONLY | O_TRUNC, 0644);
 
 	if (infd < 0) {
+		perror("Failed to open property input");
 		close(outfd);
 		return false;
 	}
 
 	if (outfd < 0) {
+		perror("Failed to open property output");
 		close(infd);
 		return false;
 	}
@@ -117,6 +122,7 @@ bool cp_prop_hex(const char* restrict indir, const char* inpath, const char* res
 	buf[1] = 'x';
 	size = read(infd, &buf[2], sizeof(buf) - 2);
 	if (size < 1) {
+		perror("Failed to read property");
 		close(infd);
 		close(outfd);
 		return false;
@@ -124,6 +130,7 @@ bool cp_prop_hex(const char* restrict indir, const char* inpath, const char* res
 	size += 2;
 
 	if (write(outfd, buf, size) != size) {
+		perror("Failed to write property");
 		close(infd);
 		close(outfd);
 		return false;
@@ -141,16 +148,20 @@ bool create_configfs(const char* configfs, const char* syspath) {
 	size_t i;
 
 	if (mkdir(configfs, 0755) == -1 && errno != EEXIST) {
+		perror("Failed to make configfs directory");
 		return false;
 	}
 
 	if (vmkdir("%s/configs/c.1", 0755, configfs) == -1 && errno != EEXIST) {
+		perror("Failed to make configfs configs directory");
 		return false;
 	}
 	if (vmkdir("%s/strings/0x409", 0755, configfs) == -1 && errno != EEXIST) {
+		perror("Failed to make configfs strings directory");
 		return false;
 	}
 	if (vmkdir("%s/configs/c.1/strings/0x409", 0755, configfs) == -1 && errno != EEXIST) {
+		perror("Failed to make configfs configs strings directory");
 		return false;
 	}
 
@@ -185,9 +196,11 @@ bool create_configfs(const char* configfs, const char* syspath) {
 
 	infd = vopen("%s/version", O_RDONLY, 0666, syspath);
 	if (infd < 0) {
+		perror("Failed to open version input file");
 		return false;
 	}
 	if (read(infd, tmp, sizeof(tmp)) < 0) {
+		perror("Failed to read version file");
 		close(infd);
 		return false;
 	}
@@ -203,6 +216,7 @@ bool create_configfs(const char* configfs, const char* syspath) {
 	tmp[2] = '0';
 	outfd = vopen("%s/bcdUSB", O_WRONLY, 0666, configfs);
 	if (outfd < 0) {
+		perror("Failed to open version output file");
 		return false;
 	}
 	write(outfd, tmp, 7);
@@ -210,9 +224,11 @@ bool create_configfs(const char* configfs, const char* syspath) {
 
 	infd = vopen("%s/bMaxPower", O_RDONLY, 0666, syspath);
 	if (infd < 0) {
+		perror("Failed to open max power input file");
 		return false;
 	}
 	if (read(infd, tmp, sizeof(tmp)) < 0) {
+		perror("Failed to read max power file");
 		close(infd);
 		return false;
 	}
@@ -234,6 +250,7 @@ bool create_configfs(const char* configfs, const char* syspath) {
 	}
 	outfd = vopen("%s/configs/c.1/MaxPower", O_WRONLY, 0666, configfs);
 	if (outfd < 0) {
+		perror("Failed to open max power output file");
 		return false;
 	}
 	write(outfd, tmp, strlen(tmp));
@@ -247,6 +264,7 @@ bool find_function(const char* syspath, char* function, size_t function_size) {
 	struct dirent* dent;
 	dir = opendir(syspath);
 	if (!dir) {
+		perror("Failed to opendir function");
 		return false;
 	}
 
@@ -273,6 +291,7 @@ bool create_configfs_function(const char* configfs, const char* syspath, int fn)
 
 	snprintf(function, sizeof(function), "%s/functions/hid.usb%d", configfs, fn);
 	if (mkdir(function, 0755) == -1 && errno != EEXIST) {
+		perror("Failed to make configfs function directory");
 		return false;
 	}
 
@@ -284,33 +303,41 @@ bool create_configfs_function(const char* configfs, const char* syspath, int fn)
 	}
 
 	if (!find_function(syspath, interface, sizeof(interface))) {
+		puts("Failed to find function");
 		return false;
 	}
 	infd = vopen("%s/report_descriptor", O_RDONLY, 0666, interface);
 	if (infd < 0) {
+		perror("Failed to open report descriptor input file");
 		return false;
 	}
 
 	desc_size = read(infd, report_descriptor, sizeof(report_descriptor));
 	if (desc_size <= 0) {
+		perror("Failed to read report descriptor file");
 		return false;
 	}
-
-	outfd = vopen("%s/report_length", O_WRONLY | O_TRUNC, 0666, function);
-	if (outfd < 0) {
-		return false;
-	}
-	dprintf(outfd, "%02i", 64); // TODO
-	close(outfd);
 
 	outfd = vopen("%s/report_desc", O_WRONLY | O_TRUNC, 0666, function);
 	if (outfd < 0) {
+		perror("Failed to open report descriptor output file");
 		return false;
 	}
+
 	if (write(outfd, report_descriptor, desc_size) != desc_size) {
+		perror("Failed to write report descriptor file");
 		close(outfd);
 		return false;
 	}
+	close(outfd);
+
+
+	outfd = vopen("%s/report_length", O_WRONLY | O_TRUNC, 0666, function);
+	if (outfd < 0) {
+		perror("Failed to open report length file");
+		return false;
+	}
+	dprintf(outfd, "%02i", 64); // TODO
 	close(outfd);
 
 	snprintf(interface, sizeof(interface), "%s/configs/c.1/hid.usb%d", configfs, fn);
@@ -326,6 +353,7 @@ int find_dev_node(unsigned nod_major, unsigned nod_minor, const char* prefix) {
 	struct stat nod;
 	dir = opendir("/dev");
 	if (!dir) {
+		perror("Failed to opendir /dev");
 		return -1;
 	}
 
@@ -338,6 +366,7 @@ int find_dev_node(unsigned nod_major, unsigned nod_minor, const char* prefix) {
 		}
 		snprintf(nod_path, sizeof(nod_path), "/dev/%s", dent->d_name);
 		if (stat(nod_path, &nod) < 0) {
+			perror("Failed to stat dev node");
 			return -1;
 		}
 		if (major(nod.st_rdev) == nod_major && minor(nod.st_rdev) == nod_minor) {
@@ -357,9 +386,11 @@ int find_dev(const char* file, const char* class) {
 
 	int fd = open(file, O_RDONLY);
 	if (fd < 0) {
+		perror("Failed to open dev path");
 		return -1;
 	}
 	if (read(fd, tmp, sizeof(tmp)) < 3) {
+		perror("Failed to read dev path");
 		close(fd);
 		return -1;
 	}
@@ -387,6 +418,7 @@ int find_hidraw(const char* syspath) {
 	strncat(function, "/hidraw", sizeof(function));
 	dir = opendir(function);
 	if (!dir) {
+		perror("Failed to opendir hidraw");
 		return -1;
 	}
 
@@ -410,6 +442,7 @@ int find_hidraw(const char* syspath) {
 bool start_udc(const char* configfs, const char* udc) {
 	int fd = vopen("%s/UDC", O_WRONLY | O_TRUNC, 0644, configfs);
 	if (fd < 0) {
+		perror("Failed to open UDC");
 		return false;
 	}
 	dprintf(fd, "%s\n", udc);
@@ -420,6 +453,7 @@ bool start_udc(const char* configfs, const char* udc) {
 bool stop_udc(const char* configfs) {
 	int fd = vopen("%s/UDC", O_WRONLY | O_TRUNC, 0644, configfs);
 	if (fd < 0) {
+		perror("Failed to open UDC");
 		return false;
 	}
 	write(fd, "\n", 1);
@@ -450,6 +484,9 @@ bool poll_fds(int* infds, int* outfds, nfds_t nfds) {
 			continue;
 		}
 		if (ret < 0) {
+			if (errno != EINTR) {
+				perror("Failed to poll nodes");
+			}
 			return did_hup;
 		}
 		for (i = 0; i < nfds * 2; ++i) {
@@ -473,6 +510,9 @@ bool poll_fds(int* infds, int* outfds, nfds_t nfds) {
 			if (fds[i].revents & POLLIN) {
 				sizein = read(fds[i].fd, buffer, sizeof(buffer));
 				if (sizein < 0) {
+					if (errno != EINTR) {
+						perror("Failed to read packet");
+					}
 					return did_hup;
 				}
 				loc = 0;
@@ -481,6 +521,9 @@ bool poll_fds(int* infds, int* outfds, nfds_t nfds) {
 					if (sizeout < 0) {
 						if (errno == EAGAIN) {
 							break;
+						}
+						if (errno != EINTR) {
+							perror("Failed to write packet");
 						}
 						return did_hup;
 					}
