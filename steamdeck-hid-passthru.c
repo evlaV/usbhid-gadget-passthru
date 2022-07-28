@@ -19,7 +19,7 @@
 
 #define DESCRIPTOR_SIZE_MAX 4096
 #define REPORT_SIZE_MAX 4096
-#define INTERFACES_MAX 16
+#define INTERFACES_MAX 8
 
 struct usb_hidg_report {
 	uint16_t length;
@@ -549,6 +549,7 @@ int main(int argc, char* argv[]) {
 	int fd;
 	int hidg[INTERFACES_MAX];
 	int hidraw[INTERFACES_MAX];
+	bool is_hid[INTERFACES_MAX];
 	int ret;
 	unsigned max_interfaces = 0;
 	unsigned i;
@@ -575,6 +576,9 @@ int main(int argc, char* argv[]) {
 		return 1;
 	}
 	max_interfaces = strtoul(tmp, NULL, 10);
+	if (max_interfaces > INTERFACES_MAX) {
+		max_interfaces = INTERFACES_MAX;
+	}
 
 	/* We want to exit cleanly in event of SIGINT or SIGHUP */
 	sigemptyset(&sa.sa_mask);
@@ -590,7 +594,24 @@ int main(int argc, char* argv[]) {
 
 	for (i = 0; i < max_interfaces; ++i) {
 		snprintf(syspath_tmp, sizeof(syspath_tmp), "%s/%s:1.%u", syspath, bus_id, i);
+		fd = vopen("%s/bInterfaceClass", O_RDONLY, 0666, syspath_tmp);
+		if (fd < 0) {
+			perror("Could not determine interface class");
+			goto shutdown;
+		}
+		if (read(fd, tmp, 3) != 3) {
+			perror("Could not determine interface class");
+			close(fd);
+			goto shutdown;
+		}
+		close(fd);
+		is_hid[i] = memcmp(tmp, "03\n", 3) == 0;
+		if (!is_hid[i]) {
+			continue;
+		}
+
 		if (!create_configfs_function(configfs, syspath_tmp, i)) {
+			perror("Could not create function");
 			goto shutdown;
 		}
 	}
@@ -599,7 +620,12 @@ int main(int argc, char* argv[]) {
 		goto shutdown;
 	}
 
-	for (i = 0; i < max_interfaces && i < INTERFACES_MAX; ++i) {
+	for (i = 0; i < max_interfaces; ++i) {
+		if (!is_hid[i]) {
+			hidg[i] = -1;
+			hidraw[i] = -1;
+			continue;
+		}
 		snprintf(syspath_tmp, sizeof(syspath_tmp), "%s/functions/hid.usb%u/dev", configfs, i);
 		hidg[i] = find_dev(syspath_tmp, "hidg");
 		ret = fcntl(hidg[i], F_GETFL, 0);
@@ -610,15 +636,13 @@ int main(int argc, char* argv[]) {
 		snprintf(syspath_tmp, sizeof(syspath_tmp), "%s/%s:1.%u", syspath, bus_id, i);
 		hidraw[i] = find_hidraw(syspath_tmp);
 		if (hidg[i] < 0 || hidraw[i] < 0) {
-			if (i + 1 < INTERFACES_MAX) {
-				hidg[i + 1] = -1;
-				hidraw[i + 1] = -1;
-			}
-			for (i = 0; hidg[i] != -1; ++i) {
-				close(hidg[i]);
-			}
-			for (i = 0; hidraw[i] != -1; ++i) {
-				close(hidraw[i]);
+			for (i = 0; i < max_interfaces; ++i) {
+				if (hidg[i] >= 0) {
+					close(hidg[i]);
+				}
+				if (hidraw[i] >= 0) {
+					close(hidraw[i]);
+				}
 			}
 			goto shutdown;
 		}
@@ -628,9 +652,9 @@ int main(int argc, char* argv[]) {
 		goto shutdown;
 	}
 
-	ok = !poll_fds(hidraw, hidg, i);
+	ok = !poll_fds(hidraw, hidg, max_interfaces);
 
-	for (i = 0; i < max_interfaces && i < INTERFACES_MAX; ++i) {
+	for (i = 0; i < max_interfaces; ++i) {
 		close(hidg[i]);
 		close(hidraw[i]);
 	}
