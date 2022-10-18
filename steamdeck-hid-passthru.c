@@ -564,15 +564,18 @@ int main(int argc, char* argv[]) {
 	/* Resolve paths to sysfs nodes */
 	snprintf(syspath_tmp, sizeof(syspath_tmp), "/sys/bus/usb/devices/%s", bus_id);
 	if (realpath(syspath_tmp, syspath) == NULL) {
+		perror("Failed to resolve sysfs path");
 		return 1;
 	}
 
 	/* Create node using configfs */
 	fd = vopen("%s/bNumInterfaces", O_RDONLY, 0666, syspath);
 	if (fd < 0) {
+		perror("Failed to open interface count");
 		return 1;
 	}
 	if (read(fd, tmp, sizeof(tmp)) < 0) {
+		perror("Failed to read interface count");
 		return 1;
 	}
 	max_interfaces = strtoul(tmp, NULL, 10);
@@ -630,6 +633,7 @@ int main(int argc, char* argv[]) {
 		hidg[i] = find_dev(syspath_tmp, "hidg");
 		ret = fcntl(hidg[i], F_GETFL, 0);
 		if (ret < 0) {
+			perror("Failed to get dev flags");
 			goto shutdown;
 		}
 		fcntl(hidg[i], F_SETFL, ret | FNONBLOCK);
