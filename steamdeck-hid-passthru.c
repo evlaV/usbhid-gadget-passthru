@@ -220,7 +220,11 @@ bool create_configfs(const char* configfs, const char* syspath) {
 		perror("Failed to open version output file");
 		return false;
 	}
-	write(outfd, tmp, 7);
+	if (write(outfd, tmp, 7) != 7) {
+		perror("Failed to write version output file");
+		close(outfd);
+		return false;
+	}
 	close(outfd);
 
 	infd = vopen("%s/bMaxPower", O_RDONLY, 0666, syspath);
@@ -254,7 +258,11 @@ bool create_configfs(const char* configfs, const char* syspath) {
 		perror("Failed to open max power output file");
 		return false;
 	}
-	write(outfd, tmp, strlen(tmp));
+	if (write(outfd, tmp, strlen(tmp)) < 0) {
+		perror("Failed to write max power output file");
+		close(outfd);
+		return false;
+	}
 	close(outfd);
 
 	return true;
@@ -338,11 +346,18 @@ bool create_configfs_function(const char* configfs, const char* syspath, int fn)
 		perror("Failed to open report length file");
 		return false;
 	}
-	dprintf(outfd, "%02i", 64); // TODO
+	if (dprintf(outfd, "%02i", 64) < 2) {
+		perror("Failed to write report length file");
+		close(outfd);
+		return false;
+	}
 	close(outfd);
 
 	snprintf(interface, sizeof(interface), "%s/configs/c.1/hid.usb%d", configfs, fn);
-	symlink(function, interface);
+	if (symlink(function, interface) < 0) {
+		perror("Failed to symlink interface config");
+		return false;
+	}
 
 	return true;
 }
@@ -446,7 +461,11 @@ bool start_udc(const char* configfs, const char* udc) {
 		perror("Failed to open UDC");
 		return false;
 	}
-	dprintf(fd, "%s\n", udc);
+	if (dprintf(fd, "%s\n", udc) < 0) {
+		perror("Failed to start UDC");
+		close(fd);
+		return false;
+	}
 	close(fd);
 	return true;
 }
@@ -457,7 +476,11 @@ bool stop_udc(const char* configfs) {
 		perror("Failed to open UDC");
 		return false;
 	}
-	write(fd, "\n", 1);
+	if (write(fd, "\n", 1) < 0) {
+		perror("Failed to stop UDC");
+		close(fd);
+		return false;
+	}
 	close(fd);
 	return true;
 }
