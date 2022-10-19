@@ -8,10 +8,13 @@ else
   CFLAGS += -g
 endif
 
-.PHONY: clean
+.PHONY: clean install
 
 clean:
 	rm steamdeck-hid-passthru steamdeck-hid-passthru.o
+
+install: all
+	install -Ds -m755 -t "$(DESTDIR)/usr/bin" steamdeck-hid-passthru
 
 steamdeck-hid-passthru.o : steamdeck-hid-passthru.c
 steamdeck-hid-passthru: steamdeck-hid-passthru.o
