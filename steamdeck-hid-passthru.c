@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: BSD-3-Clause */
 #include <ctype.h>
 #include <dirent.h>
 #include <errno.h>
