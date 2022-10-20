@@ -24,7 +24,7 @@
 
 struct usb_hidg_report {
 	uint16_t length;
-	uint8_t data[512];
+	uint8_t data[64];
 };
 
 #define GADGET_HID_READ_SET_REPORT	_IOR('g', 0x41, struct usb_hidg_report)
@@ -487,6 +487,7 @@ bool stop_udc(const char* configfs) {
 
 bool poll_fds(int* infds, int* outfds, nfds_t nfds) {
 	struct pollfd fds[INTERFACES_MAX * 2];
+	struct pollfd outpoll;
 	uint8_t buffer[REPORT_SIZE_MAX];
 	ssize_t sizein;
 	ssize_t sizeout;
@@ -514,6 +515,9 @@ bool poll_fds(int* infds, int* outfds, nfds_t nfds) {
 			return did_hup;
 		}
 		for (i = 0; i < nfds * 2; ++i) {
+			if (fds[i].revents & (POLLERR | POLLHUP | POLLNVAL)) {
+				return did_hup;
+			}
 			if (fds[i].revents & POLLPRI) {
 				if (ioctl(fds[i].fd, GADGET_HID_READ_SET_REPORT, &set_report) < 0) {
 					perror("SET ioctl in failed");
@@ -532,6 +536,13 @@ bool poll_fds(int* infds, int* outfds, nfds_t nfds) {
 				fds[i].revents &= ~POLLPRI;
 			}
 			if (fds[i].revents & POLLIN) {
+				outpoll.fd = fds[i ^ 1].fd;
+				outpoll.events = POLLOUT;
+				outpoll.revents = 0;
+				if (poll(&outpoll, 1, 0) != 1) {
+					continue;
+				}
+
 				sizein = read(fds[i].fd, buffer, sizeof(buffer));
 				if (sizein < 0) {
 					if (errno != EINTR) {
@@ -556,9 +567,6 @@ bool poll_fds(int* infds, int* outfds, nfds_t nfds) {
 				}
 				fds[i].revents &= ~POLLIN;
 			}
-			if (fds[i].revents & (POLLERR | POLLHUP | POLLNVAL)) {
-				return did_hup;
-			}
 		}
 	}
 	return true;
@@ -576,7 +584,7 @@ int main(int argc, char* argv[]) {
 	bool is_hid[INTERFACES_MAX];
 	int ret;
 	unsigned max_interfaces = 0;
-	unsigned i;
+	unsigned i, j;
 	struct sigaction sa;
 	int ok = 1;
 
@@ -647,23 +655,23 @@ int main(int argc, char* argv[]) {
 		goto shutdown;
 	}
 
-	for (i = 0; i < max_interfaces; ++i) {
+	for (i = 0, j = 0; i < max_interfaces; ++i) {
 		if (!is_hid[i]) {
-			hidg[i] = -1;
-			hidraw[i] = -1;
+			hidg[j] = -1;
+			hidraw[j] = -1;
 			continue;
 		}
 		snprintf(syspath_tmp, sizeof(syspath_tmp), "%s/functions/hid.usb%u/dev", configfs, i);
-		hidg[i] = find_dev(syspath_tmp, "hidg");
-		ret = fcntl(hidg[i], F_GETFL, 0);
+		hidg[j] = find_dev(syspath_tmp, "hidg");
+		ret = fcntl(hidg[j], F_GETFL, 0);
 		if (ret < 0) {
 			perror("Failed to get dev flags");
 			goto shutdown;
 		}
-		fcntl(hidg[i], F_SETFL, ret | FNONBLOCK);
+		fcntl(hidg[j], F_SETFL, ret | FNONBLOCK);
 		snprintf(syspath_tmp, sizeof(syspath_tmp), "%s/%s:1.%u", syspath, bus_id, i);
-		hidraw[i] = find_hidraw(syspath_tmp);
-		if (hidg[i] < 0 || hidraw[i] < 0) {
+		hidraw[j] = find_hidraw(syspath_tmp);
+		if (hidg[j] < 0 || hidraw[j] < 0) {
 			for (i = 0; i < max_interfaces; ++i) {
 				if (hidg[i] >= 0) {
 					close(hidg[i]);
@@ -674,7 +682,9 @@ int main(int argc, char* argv[]) {
 			}
 			goto shutdown;
 		}
+		++j;
 	}
+	max_interfaces = j;
 
 	if (did_hup) {
 		goto shutdown;
