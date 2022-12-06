@@ -422,6 +422,61 @@ int find_dev(const char* file, const char* class) {
 	return find_dev_node(nod_major, nod_minor, class);
 }
 
+bool find_dev_by_id(const char* vidpid, char* out) {
+	DIR* dir;
+	struct dirent* dent;
+	char tmp[5] = {0};
+	int fd;
+
+	dir = opendir("/sys/bus/usb/devices");
+	if (!dir) {
+		perror("Failed to opendir usb/devices");
+		return false;
+	}
+
+	while ((dent = readdir(dir))) {
+		if (strncmp(dent->d_name, "usb", 3) == 0) {
+			continue;
+		}
+		if (dent->d_name[0] == '.') {
+			continue;
+		}
+		if (strchr(dent->d_name, ':')) {
+			continue;
+		}
+
+		fd = vopen("/sys/bus/usb/devices/%s/idVendor", O_RDONLY, 0666, dent->d_name);
+		if (fd < 0) {
+			continue;
+		}
+		if (read(fd, tmp, 4) < 4) {
+			close(fd);
+			continue;
+		}
+		close(fd);
+		if (strncasecmp(tmp, vidpid, 4) != 0) {
+			continue;
+		}
+
+		fd = vopen("/sys/bus/usb/devices/%s/idProduct", O_RDONLY, 0666, dent->d_name);
+		if (fd < 0) {
+			continue;
+		}
+		if (read(fd, tmp, 4) < 4) {
+			close(fd);
+			continue;
+		}
+		close(fd);
+		if (strncasecmp(tmp, &vidpid[5], 4) != 0) {
+			continue;
+		}
+		snprintf(out, PATH_MAX, "/sys/bus/usb/devices/%s", dent->d_name);
+		break;
+	}
+	closedir(dir);
+	return !!dent;
+}
+
 int find_hidraw(const char* syspath) {
 	char function[PATH_MAX];
 	char filename[PATH_MAX];
@@ -576,8 +631,8 @@ int main(int argc, char* argv[]) {
 	char syspath[PATH_MAX];
 	char syspath_tmp[PATH_MAX];
 	char configfs[PATH_MAX];
+	char bus_id[32];
 	char tmp[16];
-	const char* bus_id;
 	int fd;
 	int hidg[INTERFACES_MAX];
 	int hidraw[INTERFACES_MAX];
@@ -589,16 +644,21 @@ int main(int argc, char* argv[]) {
 	int ok = 1;
 
 	if (argc != 4) {
+		puts("Missing arguments");
 		return 0;
 	}
-	bus_id = argv[1];
 
 	/* Resolve paths to sysfs nodes */
-	snprintf(syspath_tmp, sizeof(syspath_tmp), "/sys/bus/usb/devices/%s", bus_id);
+	if (strchr(argv[1], ':') && strlen(argv[1]) == 9) {
+		find_dev_by_id(argv[1], syspath_tmp);
+	} else {
+		snprintf(syspath_tmp, sizeof(syspath_tmp), "/sys/bus/usb/devices/%s", argv[1]);
+	}
 	if (realpath(syspath_tmp, syspath) == NULL) {
 		perror("Failed to resolve sysfs path");
 		return 1;
 	}
+	strncpy(bus_id, strrchr(syspath_tmp, '/') + 1, sizeof(bus_id) - 1);
 
 	/* Create node using configfs */
 	fd = vopen("%s/bNumInterfaces", O_RDONLY, 0666, syspath);
