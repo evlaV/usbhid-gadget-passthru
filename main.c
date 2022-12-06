@@ -510,6 +510,27 @@ int find_hidraw(const char* syspath) {
 	return find_dev(filename, "hidraw");
 }
 
+bool find_udc(char* out) {
+	DIR* dir;
+	struct dirent* dent;
+
+	dir = opendir("/sys/class/udc");
+	if (!dir) {
+		perror("Failed to opendir udc");
+		return false;
+	}
+
+	while ((dent = readdir(dir))) {
+		if (dent->d_name[0] == '.') {
+			continue;
+		}
+		strncpy(out, dent->d_name, PATH_MAX - 1);
+		break;
+	}
+	closedir(dir);
+	return !!dent;
+}
+
 bool start_udc(const char* configfs, const char* udc) {
 	int fd = vopen("%s/UDC", O_WRONLY | O_TRUNC, 0644, configfs);
 	if (fd < 0) {
@@ -631,6 +652,7 @@ int main(int argc, char* argv[]) {
 	char syspath[PATH_MAX];
 	char syspath_tmp[PATH_MAX];
 	char configfs[PATH_MAX];
+	char udc[PATH_MAX];
 	char bus_id[32];
 	char tmp[16];
 	int fd;
@@ -643,7 +665,7 @@ int main(int argc, char* argv[]) {
 	struct sigaction sa;
 	int ok = 1;
 
-	if (argc != 4) {
+	if (argc < 3 || argc > 4) {
 		puts("Missing arguments");
 		return 0;
 	}
@@ -711,7 +733,14 @@ int main(int argc, char* argv[]) {
 		}
 	}
 
-	if (!start_udc(configfs, argv[3])) {
+	if (argc == 4) {
+		strncpy(udc, argv[3], sizeof(udc) - 1);
+	} else if (!find_udc(udc)) {
+		perror("Could not find UDC");
+		goto shutdown;
+	}
+
+	if (!start_udc(configfs, udc)) {
 		goto shutdown;
 	}
 
