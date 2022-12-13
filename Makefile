@@ -11,7 +11,6 @@ endif
 OBJS=\
 	src/dev.o \
 	src/log.o \
-	src/main.o \
 	src/options.o \
 	src/usb.o \
 	src/util.o
@@ -25,10 +24,11 @@ install: all
 	install -Ds -m755 -t "$(DESTDIR)/usr/bin" usbhid-gadget-passthru
 
 src/dev.o: include/dev.h include/log.h include/util.h
-src/main.o: include/dev.h include/log.h include/options.h include/usb.h include/util.h
 src/options.o: include/options.h
 src/usb.o: include/usb.h include/dev.h include/log.h include/util.h
 src/util.o: include/util.h include/log.h
 
-usbhid-gadget-passthru: $(OBJS)
+src/udc.o: include/dev.h include/log.h include/options.h include/usb.h include/util.h
+
+usbhid-gadget-passthru: $(OBJS) src/udc.o
 	$(CC) $(LDFLAGS) -o $@ $^
