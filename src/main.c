@@ -1,21 +1,20 @@
 /* SPDX-License-Identifier: BSD-3-Clause */
+#include "dev.h"
+#include "util.h"
+
 #include <ctype.h>
 #include <dirent.h>
 #include <errno.h>
-#include <fcntl.h>
 #include <inttypes.h>
 #include <linux/hidraw.h>
 #include <poll.h>
 #include <signal.h>
-#include <stdarg.h>
-#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/fcntl.h>
 #include <sys/ioctl.h>
 #include <sys/stat.h>
-#include <sys/sysmacros.h>
 #include <unistd.h>
 
 #define DESCRIPTOR_SIZE_MAX 4096
@@ -34,112 +33,6 @@ bool did_hup = false;
 
 void hup() {
 	did_hup = true;
-}
-
-__attribute__((format(printf, 1, 3)))
-int vmkdir(const char* pattern, int mode, ...) {
-	char path[PATH_MAX];
-	va_list args;
-	va_start(args, mode);
-	vsnprintf(path, sizeof(path), pattern, args);
-	va_end(args);
-	return mkdir(path, mode);
-}
-
-__attribute__((format(printf, 1, 4)))
-int vopen(const char* pattern, int flags, int mode, ...) {
-	char path[PATH_MAX];
-	va_list args;
-	va_start(args, mode);
-	vsnprintf(path, sizeof(path), pattern, args);
-	va_end(args);
-	return open(path, flags, mode);
-}
-
-bool cp_prop(const char* restrict indir, const char* inpath, const char* restrict outdir, const char* outpath) {
-	char in[PATH_MAX];
-	char out[PATH_MAX];
-	char buf[2048];
-	ssize_t size;
-	int infd = -1;
-	int outfd = -1;
-
-	snprintf(in, sizeof(in), "%s/%s", indir, inpath);
-	snprintf(out, sizeof(out), "%s/%s", outdir, outpath);
-	infd = open(in, O_RDONLY);
-	outfd = open(out, O_WRONLY | O_TRUNC, 0644);
-
-	if (infd < 0) {
-		perror("Failed to open property input");
-		close(outfd);
-		return false;
-	}
-
-	if (outfd < 0) {
-		perror("Failed to open property output");
-		close(infd);
-		return false;
-	}
-
-	while ((size = read(infd, buf, sizeof(buf))) > 0) {
-		if (write(outfd, buf, size) != size) {
-			perror("Failed to copy property");
-			close(infd);
-			close(outfd);
-			return false;
-		}
-	}
-	close(infd);
-	close(outfd);
-	return true;
-}
-
-bool cp_prop_hex(const char* restrict indir, const char* inpath, const char* restrict outdir, const char* outpath) {
-	char in[PATH_MAX];
-	char out[PATH_MAX];
-	char buf[2048];
-	ssize_t size;
-	int infd = -1;
-	int outfd = -1;
-
-	snprintf(in, sizeof(in), "%s/%s", indir, inpath);
-	snprintf(out, sizeof(out), "%s/%s", outdir, outpath);
-	infd = open(in, O_RDONLY);
-	outfd = open(out, O_WRONLY | O_TRUNC, 0644);
-
-	if (infd < 0) {
-		perror("Failed to open property input");
-		close(outfd);
-		return false;
-	}
-
-	if (outfd < 0) {
-		perror("Failed to open property output");
-		close(infd);
-		return false;
-	}
-
-	buf[0] = '0';
-	buf[1] = 'x';
-	size = read(infd, &buf[2], sizeof(buf) - 2);
-	if (size < 1) {
-		perror("Failed to read property");
-		close(infd);
-		close(outfd);
-		return false;
-	}
-	size += 2;
-
-	if (write(outfd, buf, size) != size) {
-		perror("Failed to write property");
-		close(infd);
-		close(outfd);
-		return false;
-	}
-
-	close(infd);
-	close(outfd);
-	return true;
 }
 
 bool create_configfs(const char* configfs, const char* syspath) {
@@ -268,28 +161,6 @@ bool create_configfs(const char* configfs, const char* syspath) {
 	return true;
 }
 
-bool find_function(const char* syspath, char* function, size_t function_size) {
-	DIR* dir;
-	struct dirent* dent;
-	dir = opendir(syspath);
-	if (!dir) {
-		perror("Failed to opendir function");
-		return false;
-	}
-
-	while ((dent = readdir(dir))) {
-		if (dent->d_type != DT_DIR) {
-			continue;
-		}
-		if (strncmp(dent->d_name, "0003:", 5) == 0) {
-			snprintf(function, function_size, "%s/%s", syspath, dent->d_name);
-			break;
-		}
-	}
-	closedir(dir);
-	return !!dent;
-}
-
 bool create_configfs_function(const char* configfs, const char* syspath, int fn) {
 	char function[PATH_MAX];
 	char interface[PATH_MAX];
@@ -360,154 +231,6 @@ bool create_configfs_function(const char* configfs, const char* syspath, int fn)
 	}
 
 	return true;
-}
-
-int find_dev_node(unsigned nod_major, unsigned nod_minor, const char* prefix) {
-	char nod_path[PATH_MAX];
-	DIR* dir;
-	struct dirent* dent;
-	struct stat nod;
-	dir = opendir("/dev");
-	if (!dir) {
-		perror("Failed to opendir /dev");
-		return -1;
-	}
-
-	while ((dent = readdir(dir))) {
-		if (dent->d_type != DT_CHR) {
-			continue;
-		}
-		if (strncmp(dent->d_name, prefix, strlen(prefix)) != 0) {
-			continue;
-		}
-		snprintf(nod_path, sizeof(nod_path), "/dev/%s", dent->d_name);
-		if (stat(nod_path, &nod) < 0) {
-			perror("Failed to stat dev node");
-			return -1;
-		}
-		if (major(nod.st_rdev) == nod_major && minor(nod.st_rdev) == nod_minor) {
-			closedir(dir);
-			return open(nod_path, O_RDWR, 0666);
-		}
-	}
-	closedir(dir);
-	return -1;
-}
-
-int find_dev(const char* file, const char* class) {
-	char tmp[16];
-	char* parse_tmp;
-	unsigned nod_major;
-	unsigned nod_minor;
-
-	int fd = open(file, O_RDONLY);
-	if (fd < 0) {
-		perror("Failed to open dev path");
-		return -1;
-	}
-	if (read(fd, tmp, sizeof(tmp)) < 3) {
-		perror("Failed to read dev path");
-		close(fd);
-		return -1;
-	}
-	close(fd);
-	nod_major = strtoul(tmp, &parse_tmp, 10);
-	if (!parse_tmp || parse_tmp[0] != ':') {
-		return -1;
-	}
-	nod_minor = strtoul(&parse_tmp[1], NULL, 10);
-	if (!parse_tmp) {
-		return -1;
-	}
-	return find_dev_node(nod_major, nod_minor, class);
-}
-
-bool find_dev_by_id(const char* vidpid, char* out) {
-	DIR* dir;
-	struct dirent* dent;
-	char tmp[5] = {0};
-	int fd;
-
-	dir = opendir("/sys/bus/usb/devices");
-	if (!dir) {
-		perror("Failed to opendir usb/devices");
-		return false;
-	}
-
-	while ((dent = readdir(dir))) {
-		if (strncmp(dent->d_name, "usb", 3) == 0) {
-			continue;
-		}
-		if (dent->d_name[0] == '.') {
-			continue;
-		}
-		if (strchr(dent->d_name, ':')) {
-			continue;
-		}
-
-		fd = vopen("/sys/bus/usb/devices/%s/idVendor", O_RDONLY, 0666, dent->d_name);
-		if (fd < 0) {
-			continue;
-		}
-		if (read(fd, tmp, 4) < 4) {
-			close(fd);
-			continue;
-		}
-		close(fd);
-		if (strncasecmp(tmp, vidpid, 4) != 0) {
-			continue;
-		}
-
-		fd = vopen("/sys/bus/usb/devices/%s/idProduct", O_RDONLY, 0666, dent->d_name);
-		if (fd < 0) {
-			continue;
-		}
-		if (read(fd, tmp, 4) < 4) {
-			close(fd);
-			continue;
-		}
-		close(fd);
-		if (strncasecmp(tmp, &vidpid[5], 4) != 0) {
-			continue;
-		}
-		snprintf(out, PATH_MAX, "/sys/bus/usb/devices/%s", dent->d_name);
-		break;
-	}
-	closedir(dir);
-	return !!dent;
-}
-
-int find_hidraw(const char* syspath) {
-	char function[PATH_MAX];
-	char filename[PATH_MAX];
-	DIR* dir;
-	struct dirent* dent;
-
-	if (!find_function(syspath, function, sizeof(function))) {
-		return -1;
-	}
-	strncat(function, "/hidraw", sizeof(function));
-	dir = opendir(function);
-	if (!dir) {
-		perror("Failed to opendir hidraw");
-		return -1;
-	}
-
-	while ((dent = readdir(dir))) {
-		if (dent->d_type != DT_DIR) {
-			continue;
-		}
-		if (strncmp(dent->d_name, "hidraw", 6) == 0) {
-			snprintf(filename, sizeof(filename), "%s/%s/dev", function, dent->d_name);
-			break;
-		}
-	}
-	if (!dent) {
-		closedir(dir);
-		return -1;
-	}
-	closedir(dir);
-	return find_dev(filename, "hidraw");
 }
 
 bool find_udc(char* out) {
