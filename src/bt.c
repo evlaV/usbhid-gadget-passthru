@@ -20,6 +20,7 @@
 #define UUID_HID "00001812-0000-1000-8000-00805f9b34fb"
 #define UUID_REPORT "00002a4d-0000-1000-8000-00805f9b34fb"
 #define UUID_PNP_ID "00002a50-0000-1000-8000-00805f9b34fb"
+#define GAP_GAMEPAD 0x03C4
 
 bool did_hup = false;
 bool did_error = false;
@@ -40,6 +41,15 @@ struct GattCharacteristic {
 	uint16_t mtu;
 	void* data;
 	size_t size;
+};
+
+struct LEAdvertisement {
+	const char* type;
+	const char** uuids;
+	const char* local_name;
+	uint16_t appearance;
+	uint16_t duration;
+	uint16_t timeout;
 };
 
 struct PnPID {
@@ -68,8 +78,13 @@ static int read_string(sd_bus*, const char*, const char*, const char*, sd_bus_me
 	return sd_bus_message_append(reply, "s", userdata);
 }
 
+static int read_string_indirect(sd_bus*, const char*, const char*, const char*, sd_bus_message* reply, void* userdata, sd_bus_error*) {
+	const char* direct = *(const char**) userdata;
+	return sd_bus_message_append(reply, "s", direct);
+}
+
 static int read_string_array(sd_bus*, const char*, const char*, const char*, sd_bus_message* reply, void* userdata, sd_bus_error*) {
-	const char** strings = userdata;
+	const char** strings = *(const char***) userdata;
 	size_t i;
 	int res;
 
@@ -91,6 +106,16 @@ static int read_string_array(sd_bus*, const char*, const char*, const char*, sd_
 static int register_application_cb(sd_bus_message*, void*, sd_bus_error* error) {
 	if (sd_bus_error_is_set(error)) {
 		printf("Failed to register application: %s\n", error->message);
+		sd_bus_error_free(error);
+		did_error = true;
+		did_hup = true;
+	}
+	return 0;
+}
+
+static int register_advert_cb(sd_bus_message*, void*, sd_bus_error* error) {
+	if (sd_bus_error_is_set(error)) {
+		printf("Failed to register advertisement: %s\n", error->message);
 		sd_bus_error_free(error);
 		did_error = true;
 		did_hup = true;
@@ -168,26 +193,37 @@ static int read_characteristic(sd_bus_message* m, void *userdata, sd_bus_error* 
 }
 
 static const sd_bus_vtable gatt_service[] = {
-        SD_BUS_VTABLE_START(0),
-		SD_BUS_PROPERTY("Primary", "b", read_bool, offsetof(struct GattService, primary), SD_BUS_VTABLE_PROPERTY_CONST),
-		SD_BUS_PROPERTY("UUID", "s", read_string, offsetof(struct GattService, uuid), SD_BUS_VTABLE_PROPERTY_CONST),
-        SD_BUS_VTABLE_END
+	SD_BUS_VTABLE_START(0),
+	SD_BUS_PROPERTY("Primary", "b", read_bool, offsetof(struct GattService, primary), SD_BUS_VTABLE_PROPERTY_CONST),
+	SD_BUS_PROPERTY("UUID", "s", read_string, offsetof(struct GattService, uuid), SD_BUS_VTABLE_PROPERTY_CONST),
+	SD_BUS_VTABLE_END
 };
 
 static const sd_bus_vtable gatt_profile[] = {
-        SD_BUS_VTABLE_START(0),
-		SD_BUS_PROPERTY("UUIDs", "as", read_string_array, 0, SD_BUS_VTABLE_PROPERTY_CONST),
-        SD_BUS_VTABLE_END
+	SD_BUS_VTABLE_START(0),
+	SD_BUS_PROPERTY("UUIDs", "as", read_string_array, 0, SD_BUS_VTABLE_PROPERTY_CONST),
+	SD_BUS_VTABLE_END
 };
 
 static const sd_bus_vtable gatt_characteristic[] = {
-        SD_BUS_VTABLE_START(0),
-		SD_BUS_PROPERTY("UUID", "s", read_string, offsetof(struct GattCharacteristic, uuid), SD_BUS_VTABLE_PROPERTY_CONST),
-		SD_BUS_PROPERTY("Service", "o", read_object_indirect, offsetof(struct GattCharacteristic, service), SD_BUS_VTABLE_PROPERTY_CONST),
-		SD_BUS_PROPERTY("Flags", "as", read_string_array, offsetof(struct GattCharacteristic, flags), SD_BUS_VTABLE_PROPERTY_CONST),
-		SD_BUS_PROPERTY("MTU", "q", read_uint16, offsetof(struct GattCharacteristic, mtu), SD_BUS_VTABLE_PROPERTY_CONST),
-		SD_BUS_METHOD_WITH_ARGS("ReadValue", "a{sv}", "ay", read_characteristic, 0),
-        SD_BUS_VTABLE_END
+	SD_BUS_VTABLE_START(0),
+	SD_BUS_PROPERTY("UUID", "s", read_string, offsetof(struct GattCharacteristic, uuid), SD_BUS_VTABLE_PROPERTY_CONST),
+	SD_BUS_PROPERTY("Service", "o", read_object_indirect, offsetof(struct GattCharacteristic, service), SD_BUS_VTABLE_PROPERTY_CONST),
+	SD_BUS_PROPERTY("Flags", "as", read_string_array, offsetof(struct GattCharacteristic, flags), SD_BUS_VTABLE_PROPERTY_CONST),
+	SD_BUS_PROPERTY("MTU", "q", read_uint16, offsetof(struct GattCharacteristic, mtu), SD_BUS_VTABLE_PROPERTY_CONST),
+	SD_BUS_METHOD_WITH_ARGS("ReadValue", "a{sv}", "ay", read_characteristic, 0),
+	SD_BUS_VTABLE_END
+};
+
+static const sd_bus_vtable le_advertisement[] = {
+	SD_BUS_VTABLE_START(0),
+	SD_BUS_PROPERTY("Type", "s", read_string_indirect, offsetof(struct LEAdvertisement, type), SD_BUS_VTABLE_PROPERTY_CONST),
+	SD_BUS_PROPERTY("ServiceUUIDs", "as", read_string_array, offsetof(struct LEAdvertisement, uuids), SD_BUS_VTABLE_PROPERTY_CONST),
+	SD_BUS_PROPERTY("LocalName", "s", read_string_indirect, offsetof(struct LEAdvertisement, local_name), SD_BUS_VTABLE_PROPERTY_CONST),
+	SD_BUS_PROPERTY("Appearance", "q", read_uint16, offsetof(struct LEAdvertisement, appearance), SD_BUS_VTABLE_PROPERTY_CONST),
+	SD_BUS_PROPERTY("Duration", "q", read_uint16, offsetof(struct LEAdvertisement, duration), SD_BUS_VTABLE_PROPERTY_CONST),
+	SD_BUS_PROPERTY("Timeout", "q", read_uint16, offsetof(struct LEAdvertisement, timeout), SD_BUS_VTABLE_PROPERTY_CONST),
+	SD_BUS_VTABLE_END
 };
 
 int main(int argc, char* argv[]) {
@@ -199,10 +235,12 @@ int main(int argc, char* argv[]) {
 	int hci;
 	sd_bus* bus;
 	sd_bus_slot* object_manager_slot = NULL;
-	sd_bus_slot* register_slot = NULL;
+	sd_bus_slot* register_service_slot = NULL;
 	sd_bus_slot* service_slot = NULL;
 	sd_bus_slot* profile_slot = NULL;
 	sd_bus_slot* char_pnp_slot = NULL;
+	sd_bus_slot* register_advert_slot = NULL;
+	sd_bus_slot* advert_slot = NULL;
 	sd_bus_message* reply = NULL;
 	sd_bus_error error;
 	int res;
@@ -215,9 +253,15 @@ int main(int argc, char* argv[]) {
 	};
 	struct GattCharacteristic char_pnp = {
 		.uuid = UUID_PNP_ID,
-		.flags = NULL,
+		.flags = (const char*[]) {"read", NULL},
 		.data = &pnp,
 		.size = sizeof(pnp)
+	};
+	struct LEAdvertisement advertisement = {
+		.type = "peripheral",
+		.uuids = (const char*[]) {UUID_HID, NULL},
+		.local_name = "USB Gamepad",
+		.appearance = GAP_GAMEPAD,
 	};
 
 	const char* profile[] = {
@@ -243,7 +287,7 @@ int main(int argc, char* argv[]) {
 
 	snprintf(gatt_manager, sizeof(gatt_manager), "/org/bluez/hci%i", hci);
 
-	res = sd_bus_open(&bus);
+	res = sd_bus_open_system(&bus);
 	if (res < 0) {
 		printf("Failed to connect to system D-Bus: %s\n", strerror(-res));
 		return 1;
@@ -271,18 +315,30 @@ int main(int argc, char* argv[]) {
 		goto shutdown;
 	}
 
+	res = sd_bus_add_object_vtable(bus, &advert_slot, "/com/valvesoftware/Deck/advert",
+		 "org.bluez.LEAdvertisement1", le_advertisement, &advertisement);
+	if (res < 0) {
+		printf("Failed to publish service: %s\n", strerror(-res));
+		goto shutdown;
+	}
+
 	res = sd_bus_add_object_manager(bus, &object_manager_slot, "/com/valvesoftware/Deck");
 	if (res < 0) {
 		printf("Failed to add object manager: %s\n", strerror(-res));
 		goto shutdown;
 	}
 
-	res = sd_bus_call_method_async(bus, &register_slot, "org.bluez", gatt_manager, "org.bluez.GattManager1",
+	res = sd_bus_call_method_async(bus, &register_advert_slot, "org.bluez", gatt_manager, "org.bluez.LEAdvertisingManager1",
+		"RegisterAdvertisement", register_advert_cb, &advertisement, "oa{sv}", "/com/valvesoftware/Deck", 0, NULL);
+	if (res < 0) {
+		printf("Failed to register advertisement: %s\n", error.message);
+		goto shutdown;
+	}
+
+	res = sd_bus_call_method_async(bus, &register_service_slot, "org.bluez", gatt_manager, "org.bluez.GattManager1",
 		"RegisterApplication", register_application_cb, NULL, "oa{sv}", "/com/valvesoftware/Deck", 0, NULL);
 	if (res < 0) {
-		printf("%d\n", res);
-		printf("Failed to register application: %s\n", error.message);
-		sd_bus_error_free(&error);
+		printf("Failed to register application: %s\n", strerror(-res));
 		goto shutdown;
 	}
 
@@ -331,11 +387,15 @@ int main(int argc, char* argv[]) {
 shutdown:
 	sd_bus_call_method(bus, "org.bluez", gatt_manager, "org.bluez.GattManager1", "UnregisterApplication",
 		&error, &reply, "o", "/com/valvesoftware/Deck");
+	sd_bus_call_method(bus, "org.bluez", gatt_manager, "org.bluez.LEAdvertisingManager1", "UnregisterAdvertisement",
+		&error, &reply, "o", "/com/valvesoftware/Deck");
 	sd_bus_slot_unref(object_manager_slot);
-	sd_bus_slot_unref(register_slot);
+	sd_bus_slot_unref(register_service_slot);
 	sd_bus_slot_unref(service_slot);
 	sd_bus_slot_unref(profile_slot);
 	sd_bus_slot_unref(char_pnp_slot);
+	sd_bus_slot_unref(register_advert_slot);
+	sd_bus_slot_unref(advert_slot);
 	sd_bus_unref(bus);
 
 	return ok;
