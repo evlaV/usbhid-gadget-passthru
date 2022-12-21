@@ -6,6 +6,7 @@
 #include <bluetooth/bluetooth.h>
 #include <bluetooth/hci.h>
 #include <bluetooth/hci_lib.h>
+#include <bluetooth/l2cap.h>
 #include <ctype.h>
 #include <dirent.h>
 #include <errno.h>
@@ -58,6 +59,18 @@ struct PnPID {
 	uint16_t pid;
 	uint16_t version;
 } __attribute__((packed));
+
+static const struct sockaddr_l2 intr_addr = {
+	.l2_family = AF_BLUETOOTH,
+	.l2_psm = htobs(HIDP_INTERRUPT_PSM),
+	.l2_bdaddr = *BDADDR_ANY,
+};
+
+static const struct sockaddr_l2 ctrl_addr = {
+	.l2_family = AF_BLUETOOTH,
+	.l2_psm = htobs(HIDP_CONTROL_PSM),
+	.l2_bdaddr = *BDADDR_ANY,
+};
 
 static int read_bool(sd_bus*, const char*, const char*, const char*, sd_bus_message* reply, void* userdata, sd_bus_error*) {
 	bool b = *(bool*) userdata;
@@ -232,6 +245,8 @@ int main(int argc, char* argv[]) {
 	char gatt_manager[PATH_MAX];
 	struct sigaction sa;
 	int ok = 1;
+	int intr = -1;
+	int ctrl = -1;
 	int hci;
 	sd_bus* bus;
 	sd_bus_slot* object_manager_slot = NULL;
@@ -339,6 +354,28 @@ int main(int argc, char* argv[]) {
 		"RegisterApplication", register_application_cb, NULL, "oa{sv}", "/com/valvesoftware/Deck", 0, NULL);
 	if (res < 0) {
 		printf("Failed to register application: %s\n", strerror(-res));
+		goto shutdown;
+	}
+
+	ctrl = socket(AF_BLUETOOTH, SOCK_SEQPACKET, BTPROTO_L2CAP);
+	if (ctrl < 0) {
+		perror("Failed to create control socket");
+		goto shutdown;
+	}
+	res = bind(ctrl, (const struct sockaddr*) &ctrl_addr, sizeof(ctrl_addr));
+	if (res < 0) {
+		perror("Failed to bind control socket");
+		goto shutdown;
+	}
+
+	intr = socket(AF_BLUETOOTH, SOCK_SEQPACKET, BTPROTO_L2CAP);
+	if (intr < 0) {
+		perror("Failed to create interrupt socket");
+		goto shutdown;
+	}
+	res = bind(intr, (const struct sockaddr*) &intr_addr, sizeof(intr_addr));
+	if (res < 0) {
+		perror("Failed to bind interrupt socket");
 		goto shutdown;
 	}
 
