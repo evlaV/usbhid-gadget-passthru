@@ -1,4 +1,6 @@
 /* SPDX-License-Identifier: BSD-3-Clause */
+#pragma once
+
 #include <stdbool.h>
 
 __attribute__((format(printf, 1, 3))) int vmkdir(const char* pattern, int mode, ...);
