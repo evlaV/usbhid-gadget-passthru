@@ -1,4 +1,5 @@
 /* SPDX-License-Identifier: BSD-3-Clause */
+#include "dbus.h"
 #include "dev.h"
 #include "usb.h"
 #include "util.h"
@@ -10,18 +11,30 @@
 #include <ctype.h>
 #include <dirent.h>
 #include <errno.h>
+#include <poll.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <systemd/sd-bus.h>
+#include <unistd.h>
 
 #define HIDP_CONTROL_PSM 0x11
 #define HIDP_INTERRUPT_PSM 0x13
+
+#define UUID_DEV_INFO "0000180a-0000-1000-8000-00805f9b34fb"
 #define UUID_HID "00001812-0000-1000-8000-00805f9b34fb"
-#define UUID_REPORT "00002a4d-0000-1000-8000-00805f9b34fb"
+
 #define UUID_PNP_ID "00002a50-0000-1000-8000-00805f9b34fb"
+
+#define UUID_HID_INFO "00002a4a-0000-1000-8000-00805f9b34fb"
+#define UUID_REPORT_MAP "00002a4b-0000-1000-8000-00805f9b34fb"
+#define UUID_HID_CONTROL "00002a4c-0000-1000-8000-00805f9b34fb"
+#define UUID_REPORT "00002a4d-0000-1000-8000-00805f9b34fb"
+#define UUID_PROTOCOL_MODE "00002a4e-0000-1000-8000-00805f9b34fb"
+
 #define GAP_GAMEPAD 0x03C4
+
+#define MAX_CHAR 8
 
 bool did_hup = false;
 bool did_error = false;
@@ -30,11 +43,6 @@ void hup() {
 	did_hup = true;
 }
 
-struct GattService {
-	bool primary;
-	char uuid[37];
-};
-
 struct GattCharacteristic {
 	char uuid[37];
 	const char* service;
@@ -42,6 +50,18 @@ struct GattCharacteristic {
 	uint16_t mtu;
 	void* data;
 	size_t size;
+
+	sd_bus_slot* slot;
+};
+
+struct GattService {
+	bool primary;
+	char uuid[37];
+
+	struct GattCharacteristic characteristics[MAX_CHAR];
+	size_t nCharacteristics;
+
+	sd_bus_slot* slot;
 };
 
 struct LEAdvertisement {
@@ -59,62 +79,6 @@ struct PnPID {
 	uint16_t pid;
 	uint16_t version;
 } __attribute__((packed));
-
-static const struct sockaddr_l2 intr_addr = {
-	.l2_family = AF_BLUETOOTH,
-	.l2_psm = htobs(HIDP_INTERRUPT_PSM),
-	.l2_bdaddr = *BDADDR_ANY,
-};
-
-static const struct sockaddr_l2 ctrl_addr = {
-	.l2_family = AF_BLUETOOTH,
-	.l2_psm = htobs(HIDP_CONTROL_PSM),
-	.l2_bdaddr = *BDADDR_ANY,
-};
-
-static int read_bool(sd_bus*, const char*, const char*, const char*, sd_bus_message* reply, void* userdata, sd_bus_error*) {
-	bool b = *(bool*) userdata;
-	return sd_bus_message_append_basic(reply, 'b', &b);
-}
-
-static int read_uint16(sd_bus*, const char*, const char*, const char*, sd_bus_message* reply, void* userdata, sd_bus_error*) {
-	uint16_t q = *(uint16_t*) userdata;
-	return sd_bus_message_append_basic(reply, 'q', &q);
-}
-
-static int read_object_indirect(sd_bus*, const char*, const char*, const char*, sd_bus_message* reply, void* userdata, sd_bus_error*) {
-	const char* direct = *(const char**) userdata;
-	return sd_bus_message_append(reply, "o", direct);
-}
-
-static int read_string(sd_bus*, const char*, const char*, const char*, sd_bus_message* reply, void* userdata, sd_bus_error*) {
-	return sd_bus_message_append(reply, "s", userdata);
-}
-
-static int read_string_indirect(sd_bus*, const char*, const char*, const char*, sd_bus_message* reply, void* userdata, sd_bus_error*) {
-	const char* direct = *(const char**) userdata;
-	return sd_bus_message_append(reply, "s", direct);
-}
-
-static int read_string_array(sd_bus*, const char*, const char*, const char*, sd_bus_message* reply, void* userdata, sd_bus_error*) {
-	const char** strings = *(const char***) userdata;
-	size_t i;
-	int res;
-
-	res = sd_bus_message_open_container(reply, 'a', "s");
-	if (res < 0) {
-		return res;
-	}
-
-	for (i = 0; strings && strings[i]; i++) {
-		res = sd_bus_message_append(reply, "s", strings[i]);
-		if (res < 0) {
-			return res;
-		}
-	}
-
-	return sd_bus_message_close_container(reply);
-}
 
 static int register_application_cb(sd_bus_message*, void*, sd_bus_error* error) {
 	if (sd_bus_error_is_set(error)) {
@@ -239,6 +203,30 @@ static const sd_bus_vtable le_advertisement[] = {
 	SD_BUS_VTABLE_END
 };
 
+static int create_server(uint16_t psm) {
+	struct sockaddr_l2 addr = {
+		.l2_family = AF_BLUETOOTH,
+		.l2_psm = htobs(psm),
+		.l2_bdaddr = *BDADDR_ANY,
+	};
+	int res;
+	int sock = socket(AF_BLUETOOTH, SOCK_SEQPACKET, BTPROTO_L2CAP);
+	if (sock < 0) {
+		return sock;
+	}
+	res = bind(sock, (const struct sockaddr*) &addr, sizeof(addr));
+	if (res < 0) {
+		close(sock);
+		return res;
+	}
+	res = listen(sock, 1);
+	if (res < 0) {
+		close(sock);
+		return res;
+	}
+	return sock;
+}
+
 int main(int argc, char* argv[]) {
 	char syspath[PATH_MAX];
 	char bus_id[32];
@@ -251,9 +239,7 @@ int main(int argc, char* argv[]) {
 	sd_bus* bus;
 	sd_bus_slot* object_manager_slot = NULL;
 	sd_bus_slot* register_service_slot = NULL;
-	sd_bus_slot* service_slot = NULL;
 	sd_bus_slot* profile_slot = NULL;
-	sd_bus_slot* char_pnp_slot = NULL;
 	sd_bus_slot* register_advert_slot = NULL;
 	sd_bus_slot* advert_slot = NULL;
 	sd_bus_message* reply = NULL;
@@ -315,7 +301,7 @@ int main(int argc, char* argv[]) {
 		goto shutdown;
 	}
 
-	res = sd_bus_add_object_vtable(bus, &service_slot, "/com/valvesoftware/Deck/service0",
+	res = sd_bus_add_object_vtable(bus, &hid.slot, "/com/valvesoftware/Deck/service0",
 		 "org.bluez.GattService1", gatt_service, &hid);
 	if (res < 0) {
 		printf("Failed to publish service: %s\n", strerror(-res));
@@ -323,7 +309,7 @@ int main(int argc, char* argv[]) {
 	}
 
 	char_pnp.service = "/com/valvesoftware/Deck/service0";
-	res = sd_bus_add_object_vtable(bus, &char_pnp_slot, "/com/valvesoftware/Deck/service0/char0000",
+	res = sd_bus_add_object_vtable(bus, &char_pnp.slot, "/com/valvesoftware/Deck/service0/char0000",
 		 "org.bluez.GattCharacteristic1", gatt_characteristic, &char_pnp);
 	if (res < 0) {
 		printf("Failed to publish service: %s\n", strerror(-res));
@@ -357,25 +343,15 @@ int main(int argc, char* argv[]) {
 		goto shutdown;
 	}
 
-	ctrl = socket(AF_BLUETOOTH, SOCK_SEQPACKET, BTPROTO_L2CAP);
+	ctrl = create_server(HIDP_CONTROL_PSM);
 	if (ctrl < 0) {
 		perror("Failed to create control socket");
 		goto shutdown;
 	}
-	res = bind(ctrl, (const struct sockaddr*) &ctrl_addr, sizeof(ctrl_addr));
-	if (res < 0) {
-		perror("Failed to bind control socket");
-		goto shutdown;
-	}
 
-	intr = socket(AF_BLUETOOTH, SOCK_SEQPACKET, BTPROTO_L2CAP);
+	intr = create_server(HIDP_INTERRUPT_PSM);
 	if (intr < 0) {
 		perror("Failed to create interrupt socket");
-		goto shutdown;
-	}
-	res = bind(intr, (const struct sockaddr*) &intr_addr, sizeof(intr_addr));
-	if (res < 0) {
-		perror("Failed to bind interrupt socket");
 		goto shutdown;
 	}
 
@@ -406,14 +382,26 @@ int main(int argc, char* argv[]) {
 			continue;
 		}
 
-		/* Wait for the next request to process */
-		res = sd_bus_wait(bus, UINT64_MAX);
-		if (res == -EINTR) {
-			continue;
-		}
-		if (res < 0) {
-			printf("Failed to wait on bus: %s\n", strerror(-res));
-			break;
+		while (!did_hup) {
+			nfds_t nfds = 2;
+			struct pollfd fds[2] = {
+				{.fd = intr, .events = POLLIN},
+				{.fd = ctrl, .events = POLLIN},
+			};
+			res = poll(fds, nfds, 2);
+			if (res > 0) {
+				puts("Event!");
+			}
+			res = sd_bus_wait(bus, 2);
+			if (res < 0 && res != -EINTR) {
+				printf("Failed to wait on bus: %s\n", strerror(-res));
+				did_hup = true;
+				did_error = true;
+				break;
+			}
+			if (res > 0) {
+				break;
+			}
 		}
 	}
 
@@ -428,12 +416,14 @@ shutdown:
 		&error, &reply, "o", "/com/valvesoftware/Deck");
 	sd_bus_slot_unref(object_manager_slot);
 	sd_bus_slot_unref(register_service_slot);
-	sd_bus_slot_unref(service_slot);
+	sd_bus_slot_unref(hid.slot);
 	sd_bus_slot_unref(profile_slot);
-	sd_bus_slot_unref(char_pnp_slot);
+	sd_bus_slot_unref(char_pnp.slot);
 	sd_bus_slot_unref(register_advert_slot);
 	sd_bus_slot_unref(advert_slot);
 	sd_bus_unref(bus);
+	close(ctrl);
+	close(intr);
 
 	return ok;
 }
