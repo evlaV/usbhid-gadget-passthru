@@ -136,6 +136,49 @@ static int create_server(uint16_t psm) {
 	return sock;
 }
 
+static void hogp_create(struct HOGPDevice* hog) {
+	static const char* flags_read[] = {"read", NULL};
+	hog->pnp_id.source = 2;
+
+	gatt_service_create(&hog->devinfo, UUID_DEV_INFO, "/com/valvesoftware/Deck/service0");
+	gatt_characteristic_create(&hog->pnp, UUID_PNP_ID, &hog->devinfo);
+	hog->pnp.flags = flags_read;
+	hog->pnp.data = &hog->pnp_id;
+	hog->pnp.size = sizeof(hog->pnp_id);
+
+	gatt_service_create(&hog->hid, UUID_HID, "/com/valvesoftware/Deck/service1");
+	//gatt_characteristic_create(&hog->hid_info, UUID_HID_INFO, &hog->hid);
+	//gatt_characteristic_create(&hog->report_map, UUID_REPORT_MAP, &hog->hid);
+	//gatt_characteristic_create(&hog->hid_control, UUID_HID_CONTROL, &hog->hid);
+	//gatt_characteristic_create(&hog->report, UUID_REPORT, &hog->hid);
+	//gatt_characteristic_create(&hog->protocol_mode, UUID_PROTOCOL_MODE, &hog->hid);
+
+	gatt_service_create(&hog->battery, UUID_BATTERY, "/com/valvesoftware/Deck/service2");
+}
+
+static int hogp_register(struct HOGPDevice* hog, sd_bus* bus) {
+	int res;
+
+	res = gatt_service_register(&hog->devinfo, bus);
+	if (res < 0) {
+		printf("Failed to publish device info service: %s\n", strerror(-res));
+		return res;
+	}
+
+	res = gatt_service_register(&hog->hid, bus);
+	if (res < 0) {
+		printf("Failed to publish HID service: %s\n", strerror(-res));
+		return res;
+	}
+
+	res = gatt_service_register(&hog->battery, bus);
+	if (res < 0) {
+		printf("Failed to publish HID service: %s\n", strerror(-res));
+		return res;
+	}
+	return 0;
+}
+
 int main(int argc, char* argv[]) {
 	char syspath[PATH_MAX];
 	char bus_id[32];
@@ -155,7 +198,6 @@ int main(int argc, char* argv[]) {
 	sd_bus_error error;
 	int res;
 	struct HOGPDevice hog;
-	hog.pnp_id.source = 1;
 	struct LEAdvertisement advertisement = {
 		.type = "peripheral",
 		.uuids = (const char*[]) {UUID_DEV_INFO, UUID_HID, NULL},
@@ -199,21 +241,11 @@ int main(int argc, char* argv[]) {
 		goto shutdown;
 	}
 
-	gatt_service_create(&hog.devinfo, UUID_DEV_INFO, "/com/valvesoftware/Deck/service0");
-	gatt_characteristic_create(&hog.pnp, UUID_PNP_ID, &hog.devinfo);
-	hog.pnp.flags = (const char*[]) {"read", NULL};
-	hog.pnp.data = &hog.pnp_id;
-	hog.pnp.size = sizeof(hog.pnp_id);
-	res = gatt_service_register(&hog.devinfo, bus);
-	if (res < 0) {
-		printf("Failed to publish device info service: %s\n", strerror(-res));
-		goto shutdown;
-	}
+	hogp_create(&hog);
 
-	gatt_service_create(&hog.hid, UUID_HID, "/com/valvesoftware/Deck/service1");
-	res = gatt_service_register(&hog.hid, bus);
+	res = hogp_register(&hog, bus);
 	if (res < 0) {
-		printf("Failed to publish HID service: %s\n", strerror(-res));
+		printf("Failed to publish HOGP: %s\n", strerror(-res));
 		goto shutdown;
 	}
 

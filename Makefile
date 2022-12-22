@@ -11,6 +11,7 @@ ifeq ($(DEBUG),)
   CFLAGS += -O2 -D_FORTIFY_SOURCE=2
 else
   CFLAGS += -g
+  LDFLAGS += -g
 endif
 
 OBJS=\
@@ -23,7 +24,7 @@ OBJS=\
 .PHONY: clean install
 
 clean:
-	rm -f usbhid-gadget-passthru $(OBJS) src/bt.o
+	rm -f usbhid-gadget-passthru $(OBJS) src/bt.o src/dbus.o src/gatt.o
 
 install: all
 	install -Ds -m755 -t "$(DESTDIR)/usr/bin" usbhid-gadget-passthru
