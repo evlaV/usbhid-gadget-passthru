@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: BSD-3-Clause */
 #include "dbus.h"
 #include "dev.h"
+#include "gatt.h"
 #include "usb.h"
 #include "util.h"
 
@@ -22,6 +23,7 @@
 #define HIDP_INTERRUPT_PSM 0x13
 
 #define UUID_DEV_INFO "0000180a-0000-1000-8000-00805f9b34fb"
+#define UUID_BATTERY "0000180f-0000-1000-8000-00805f9b34fb"
 #define UUID_HID "00001812-0000-1000-8000-00805f9b34fb"
 
 #define UUID_PNP_ID "00002a50-0000-1000-8000-00805f9b34fb"
@@ -34,36 +36,12 @@
 
 #define GAP_GAMEPAD 0x03C4
 
-#define MAX_CHAR 8
-
 bool did_hup = false;
 bool did_error = false;
 
 void hup() {
 	did_hup = true;
 }
-
-struct GattCharacteristic {
-	char uuid[37];
-	const char* service;
-	const char** flags;
-	uint16_t mtu;
-	void* data;
-	size_t size;
-
-	sd_bus_slot* slot;
-};
-
-struct GattService {
-	bool primary;
-	char uuid[37];
-
-	struct GattCharacteristic* characteristics[MAX_CHAR];
-	size_t nCharacteristics;
-
-	const char* path;
-	sd_bus_slot* slot;
-};
 
 struct LEAdvertisement {
 	const char* type;
@@ -80,6 +58,28 @@ struct PnPID {
 	uint16_t pid;
 	uint16_t version;
 } __attribute__((packed));
+
+struct HOGPDevice {
+	struct GattService devinfo;
+	struct GattService hid;
+	struct GattService battery;
+
+	struct GattCharacteristic pnp;
+
+	struct GattCharacteristic hid_info;
+	struct GattCharacteristic report_map;
+	struct GattCharacteristic hid_control;
+	struct GattCharacteristic report;
+	struct GattCharacteristic protocol_mode;
+
+	struct PnPID pnp_id;
+};
+
+static const sd_bus_vtable gatt_profile[] = {
+	SD_BUS_VTABLE_START(0),
+	SD_BUS_PROPERTY("UUIDs", "as", read_string_array, 0, SD_BUS_VTABLE_PROPERTY_CONST),
+	SD_BUS_VTABLE_END
+};
 
 static int register_application_cb(sd_bus_message*, void*, sd_bus_error* error) {
 	if (sd_bus_error_is_set(error)) {
@@ -101,98 +101,6 @@ static int register_advert_cb(sd_bus_message*, void*, sd_bus_error* error) {
 	return 0;
 }
 
-static int read_characteristic(sd_bus_message* m, void *userdata, sd_bus_error* error) {
-	struct GattCharacteristic* characteristic = userdata;
-	const char* opt;
-	int res;
-	size_t offset = 0;
-	size_t length = characteristic->size;
-	sd_bus_message* reply;
-
-	res = sd_bus_message_enter_container(m, 'a', "{sv}");
-	if (res < 0) {
-		return res;
-	}
-
-	while ((res = sd_bus_message_enter_container(m, 'e', "sv")) > 0) {
-		res = sd_bus_message_read(m, "s", &opt);
-		if (res < 0) {
-			return res;
-		}
-		puts(opt);
-		if (strcasecmp(opt, "offset") == 0) {
-			char type;
-			uint16_t read_offset;
-			res = sd_bus_message_peek_type(m, &type, NULL);
-			if (res < 0) {
-				return res;
-			}
-			if (type != 'q') {
-				return -EINVAL;
-			}
-
-			res = sd_bus_message_read(m, "q", &read_offset);
-			if (res < 0) {
-				return res;
-			}
-
-			if (read_offset > length) {
-				return sd_bus_error_setf(error, "org.bluez.Error.InvalidOffset", "Requested offset %u exceeds characteristic size %zu", read_offset, length);
-			}
-			offset = read_offset;
-			length -= read_offset;
-		}
-
-		res = sd_bus_message_exit_container(m);
-		if (res < 0) {
-			return res;
-		}
-	}
-	if (res < 0) {
-		return res;
-	}
-
-	res = sd_bus_message_exit_container(m);
-	if (res < 0) {
-		return res;
-	}
-
-	res = sd_bus_message_new_method_return(m, &reply);
-	if (res < 0) {
-		return res;
-	}
-
-	res = sd_bus_message_append_array(reply, 'y', &((uint8_t*) characteristic->data)[offset], length);
-	if (res < 0) {
-		return res;
-	}
-
-	return sd_bus_message_send(reply);
-}
-
-static const sd_bus_vtable gatt_service[] = {
-	SD_BUS_VTABLE_START(0),
-	SD_BUS_PROPERTY("Primary", "b", read_bool, offsetof(struct GattService, primary), SD_BUS_VTABLE_PROPERTY_CONST),
-	SD_BUS_PROPERTY("UUID", "s", read_string, offsetof(struct GattService, uuid), SD_BUS_VTABLE_PROPERTY_CONST),
-	SD_BUS_VTABLE_END
-};
-
-static const sd_bus_vtable gatt_profile[] = {
-	SD_BUS_VTABLE_START(0),
-	SD_BUS_PROPERTY("UUIDs", "as", read_string_array, 0, SD_BUS_VTABLE_PROPERTY_CONST),
-	SD_BUS_VTABLE_END
-};
-
-static const sd_bus_vtable gatt_characteristic[] = {
-	SD_BUS_VTABLE_START(0),
-	SD_BUS_PROPERTY("UUID", "s", read_string, offsetof(struct GattCharacteristic, uuid), SD_BUS_VTABLE_PROPERTY_CONST),
-	SD_BUS_PROPERTY("Service", "o", read_object_indirect, offsetof(struct GattCharacteristic, service), SD_BUS_VTABLE_PROPERTY_CONST),
-	SD_BUS_PROPERTY("Flags", "as", read_string_array, offsetof(struct GattCharacteristic, flags), SD_BUS_VTABLE_PROPERTY_CONST),
-	SD_BUS_PROPERTY("MTU", "q", read_uint16, offsetof(struct GattCharacteristic, mtu), SD_BUS_VTABLE_PROPERTY_CONST),
-	SD_BUS_METHOD_WITH_ARGS("ReadValue", "a{sv}", "ay", read_characteristic, 0),
-	SD_BUS_VTABLE_END
-};
-
 static const sd_bus_vtable le_advertisement[] = {
 	SD_BUS_VTABLE_START(0),
 	SD_BUS_PROPERTY("Type", "s", read_string_indirect, offsetof(struct LEAdvertisement, type), SD_BUS_VTABLE_PROPERTY_CONST),
@@ -203,46 +111,6 @@ static const sd_bus_vtable le_advertisement[] = {
 	SD_BUS_PROPERTY("Timeout", "q", read_uint16, offsetof(struct LEAdvertisement, timeout), SD_BUS_VTABLE_PROPERTY_CONST),
 	SD_BUS_VTABLE_END
 };
-
-void gatt_service_create(struct GattService* service, const char* uuid, const char* path) {
-	memset(service, 0, sizeof(*service));
-	strncpy(service->uuid, uuid, sizeof(service->uuid) - 1);
-	service->primary = true;
-	service->path = path;
-}
-
-int gatt_service_register(struct GattService* service, sd_bus* bus) {
-	size_t i;
-	int res = sd_bus_add_object_vtable(bus, &service->slot, service->path,
-		"org.bluez.GattService1", gatt_service, service);
-	if (res < 0) {
-		return res;
-	}
-
-	for (i = 0; i < service->nCharacteristics; ++i) {
-		char path[PATH_MAX] = {0};
-		snprintf(path, sizeof(path) - 1, "%s/char%04zx", service->path, i);
-		res = sd_bus_add_object_vtable(bus, &service->characteristics[i]->slot, path,
-			 "org.bluez.GattCharacteristic1", gatt_characteristic, service->characteristics[i]);
-		if (res < 0) {
-			break;
-		}
-	}
-	return res;
-};
-
-void gatt_characteristic_create(struct GattCharacteristic* characteristic, const char* uuid, struct GattService* parent) {
-	memset(characteristic, 0, sizeof(*characteristic));
-	strncpy(characteristic->uuid, uuid, sizeof(characteristic->uuid) - 1);
-	characteristic->service = parent->path;
-
-	if (parent->nCharacteristics == MAX_CHAR) {
-		abort();
-	}
-
-	parent->characteristics[parent->nCharacteristics] = characteristic;
-	++parent->nCharacteristics;
-}
 
 static int create_server(uint16_t psm) {
 	struct sockaddr_l2 addr = {
@@ -286,12 +154,8 @@ int main(int argc, char* argv[]) {
 	sd_bus_message* reply = NULL;
 	sd_bus_error error;
 	int res;
-	struct GattService hid;
-	struct GattService devinfo;
-	struct GattCharacteristic char_pnp;
-	struct PnPID pnp = {
-		.source = 2
-	};
+	struct HOGPDevice hog;
+	hog.pnp_id.source = 1;
 	struct LEAdvertisement advertisement = {
 		.type = "peripheral",
 		.uuids = (const char*[]) {UUID_DEV_INFO, UUID_HID, NULL},
@@ -335,19 +199,19 @@ int main(int argc, char* argv[]) {
 		goto shutdown;
 	}
 
-	gatt_service_create(&devinfo, UUID_DEV_INFO, "/com/valvesoftware/Deck/service0");
-	gatt_characteristic_create(&char_pnp, UUID_PNP_ID, &devinfo);
-	char_pnp.flags = (const char*[]) {"read", NULL};
-	char_pnp.data = &pnp;
-	char_pnp.size = sizeof(pnp);
-	res = gatt_service_register(&devinfo, bus);
+	gatt_service_create(&hog.devinfo, UUID_DEV_INFO, "/com/valvesoftware/Deck/service0");
+	gatt_characteristic_create(&hog.pnp, UUID_PNP_ID, &hog.devinfo);
+	hog.pnp.flags = (const char*[]) {"read", NULL};
+	hog.pnp.data = &hog.pnp_id;
+	hog.pnp.size = sizeof(hog.pnp_id);
+	res = gatt_service_register(&hog.devinfo, bus);
 	if (res < 0) {
 		printf("Failed to publish device info service: %s\n", strerror(-res));
 		goto shutdown;
 	}
 
-	gatt_service_create(&hid, UUID_HID, "/com/valvesoftware/Deck/service1");
-	res = gatt_service_register(&hid, bus);
+	gatt_service_create(&hog.hid, UUID_HID, "/com/valvesoftware/Deck/service1");
+	res = gatt_service_register(&hog.hid, bus);
 	if (res < 0) {
 		printf("Failed to publish HID service: %s\n", strerror(-res));
 		goto shutdown;
@@ -453,9 +317,10 @@ shutdown:
 		&error, &reply, "o", "/com/valvesoftware/Deck");
 	sd_bus_slot_unref(object_manager_slot);
 	sd_bus_slot_unref(register_service_slot);
-	sd_bus_slot_unref(hid.slot);
+	sd_bus_slot_unref(hog.devinfo.slot);
+	sd_bus_slot_unref(hog.hid.slot);
 	sd_bus_slot_unref(profile_slot);
-	sd_bus_slot_unref(char_pnp.slot);
+	sd_bus_slot_unref(hog.pnp.slot);
 	sd_bus_slot_unref(register_advert_slot);
 	sd_bus_slot_unref(advert_slot);
 	sd_bus_unref(bus);

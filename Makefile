@@ -33,15 +33,16 @@ src/options.o: include/options.h
 src/usb.o: include/usb.h include/dev.h include/log.h include/util.h
 src/util.o: include/util.h include/log.h
 
-src/udc.o: include/dev.h include/log.h include/options.h include/usb.h include/util.h
-src/bt.o: include/dbus.h include/dev.h include/usb.h include/util.h
+src/bt.o: include/dbus.h include/dev.h include/gatt.h include/usb.h include/util.h
 src/dbus.o: include/dbus.h
+src/gatt.o: include/dbus.h include/gatt.h
+src/udc.o: include/dev.h include/log.h include/options.h include/usb.h include/util.h
 
 src/bt.o: CFLAGS += $(BLUEZ_CFLAGS) $(SDBUS_CFLAGS)
-src/dbus.o: CFLAGS += $(SDBUS_CFLAGS)
+src/dbus.o src/gatt.o: CFLAGS += $(SDBUS_CFLAGS)
 
 usbhid-gadget-passthru: $(OBJS) src/udc.o
 	$(CC) $(LDFLAGS) -o $@ $^
 
-usbhid-bt-passthru: $(OBJS) src/bt.o src/dbus.o
+usbhid-bt-passthru: $(OBJS) src/bt.o src/dbus.o src/gatt.o
 	$(CC) $(LDFLAGS) $(BLUEZ_LDFLAGS) $(SDBUS_LDFLAGS) -o $@ $^
