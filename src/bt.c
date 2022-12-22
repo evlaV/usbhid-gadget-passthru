@@ -58,9 +58,10 @@ struct GattService {
 	bool primary;
 	char uuid[37];
 
-	struct GattCharacteristic characteristics[MAX_CHAR];
+	struct GattCharacteristic* characteristics[MAX_CHAR];
 	size_t nCharacteristics;
 
+	const char* path;
 	sd_bus_slot* slot;
 };
 
@@ -203,6 +204,46 @@ static const sd_bus_vtable le_advertisement[] = {
 	SD_BUS_VTABLE_END
 };
 
+void gatt_service_create(struct GattService* service, const char* uuid, const char* path) {
+	memset(service, 0, sizeof(*service));
+	strncpy(service->uuid, uuid, sizeof(service->uuid) - 1);
+	service->primary = true;
+	service->path = path;
+}
+
+int gatt_service_register(struct GattService* service, sd_bus* bus) {
+	size_t i;
+	int res = sd_bus_add_object_vtable(bus, &service->slot, service->path,
+		"org.bluez.GattService1", gatt_service, service);
+	if (res < 0) {
+		return res;
+	}
+
+	for (i = 0; i < service->nCharacteristics; ++i) {
+		char path[PATH_MAX] = {0};
+		snprintf(path, sizeof(path) - 1, "%s/char%04zx", service->path, i);
+		res = sd_bus_add_object_vtable(bus, &service->characteristics[i]->slot, path,
+			 "org.bluez.GattCharacteristic1", gatt_characteristic, service->characteristics[i]);
+		if (res < 0) {
+			break;
+		}
+	}
+	return res;
+};
+
+void gatt_characteristic_create(struct GattCharacteristic* characteristic, const char* uuid, struct GattService* parent) {
+	memset(characteristic, 0, sizeof(*characteristic));
+	strncpy(characteristic->uuid, uuid, sizeof(characteristic->uuid) - 1);
+	characteristic->service = parent->path;
+
+	if (parent->nCharacteristics == MAX_CHAR) {
+		abort();
+	}
+
+	parent->characteristics[parent->nCharacteristics] = characteristic;
+	++parent->nCharacteristics;
+}
+
 static int create_server(uint16_t psm) {
 	struct sockaddr_l2 addr = {
 		.l2_family = AF_BLUETOOTH,
@@ -245,22 +286,15 @@ int main(int argc, char* argv[]) {
 	sd_bus_message* reply = NULL;
 	sd_bus_error error;
 	int res;
-	struct GattService hid = {
-		.primary = true,
-		.uuid = UUID_HID
-	};
+	struct GattService hid;
+	struct GattService devinfo;
+	struct GattCharacteristic char_pnp;
 	struct PnPID pnp = {
 		.source = 2
 	};
-	struct GattCharacteristic char_pnp = {
-		.uuid = UUID_PNP_ID,
-		.flags = (const char*[]) {"read", NULL},
-		.data = &pnp,
-		.size = sizeof(pnp)
-	};
 	struct LEAdvertisement advertisement = {
 		.type = "peripheral",
-		.uuids = (const char*[]) {UUID_HID, NULL},
+		.uuids = (const char*[]) {UUID_DEV_INFO, UUID_HID, NULL},
 		.local_name = "USB Gamepad",
 		.appearance = GAP_GAMEPAD,
 	};
@@ -301,25 +335,28 @@ int main(int argc, char* argv[]) {
 		goto shutdown;
 	}
 
-	res = sd_bus_add_object_vtable(bus, &hid.slot, "/com/valvesoftware/Deck/service0",
-		 "org.bluez.GattService1", gatt_service, &hid);
+	gatt_service_create(&devinfo, UUID_DEV_INFO, "/com/valvesoftware/Deck/service0");
+	gatt_characteristic_create(&char_pnp, UUID_PNP_ID, &devinfo);
+	char_pnp.flags = (const char*[]) {"read", NULL};
+	char_pnp.data = &pnp;
+	char_pnp.size = sizeof(pnp);
+	res = gatt_service_register(&devinfo, bus);
 	if (res < 0) {
-		printf("Failed to publish service: %s\n", strerror(-res));
+		printf("Failed to publish device info service: %s\n", strerror(-res));
 		goto shutdown;
 	}
 
-	char_pnp.service = "/com/valvesoftware/Deck/service0";
-	res = sd_bus_add_object_vtable(bus, &char_pnp.slot, "/com/valvesoftware/Deck/service0/char0000",
-		 "org.bluez.GattCharacteristic1", gatt_characteristic, &char_pnp);
+	gatt_service_create(&hid, UUID_HID, "/com/valvesoftware/Deck/service1");
+	res = gatt_service_register(&hid, bus);
 	if (res < 0) {
-		printf("Failed to publish service: %s\n", strerror(-res));
+		printf("Failed to publish HID service: %s\n", strerror(-res));
 		goto shutdown;
 	}
 
 	res = sd_bus_add_object_vtable(bus, &advert_slot, "/com/valvesoftware/Deck/advert",
 		 "org.bluez.LEAdvertisement1", le_advertisement, &advertisement);
 	if (res < 0) {
-		printf("Failed to publish service: %s\n", strerror(-res));
+		printf("Failed to publish advertisement: %s\n", strerror(-res));
 		goto shutdown;
 	}
 
