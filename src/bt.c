@@ -32,7 +32,6 @@
 #define UUID_REPORT_MAP "00002a4b-0000-1000-8000-00805f9b34fb"
 #define UUID_HID_CONTROL "00002a4c-0000-1000-8000-00805f9b34fb"
 #define UUID_REPORT "00002a4d-0000-1000-8000-00805f9b34fb"
-#define UUID_PROTOCOL_MODE "00002a4e-0000-1000-8000-00805f9b34fb"
 
 #define GAP_GAMEPAD 0x03C4
 
@@ -59,6 +58,12 @@ struct PnPID {
 	uint16_t version;
 } __attribute__((packed));
 
+struct HIDInfo {
+	uint16_t bcdHID;
+	uint8_t bCountryCode;
+	uint8_t flags;
+};
+
 struct HOGPDevice {
 	struct GattService devinfo;
 	struct GattService hid;
@@ -69,10 +74,17 @@ struct HOGPDevice {
 	struct GattCharacteristic hid_info;
 	struct GattCharacteristic report_map;
 	struct GattCharacteristic hid_control;
-	struct GattCharacteristic report;
-	struct GattCharacteristic protocol_mode;
+	struct GattCharacteristic input_report;
+	struct GattCharacteristic ouput_report;
+	struct GattCharacteristic feature_report;
 
-	struct PnPID pnp_id;
+	struct GattDescriptor input_report_reference;
+	struct GattDescriptor input_report_client_config;
+	struct GattDescriptor output_report_reference;
+	struct GattDescriptor feature_report_reference;
+
+	struct PnPID pnp_data;
+	struct HIDInfo hid_info_data;
 };
 
 static const sd_bus_vtable gatt_profile[] = {
@@ -138,20 +150,25 @@ static int create_server(uint16_t psm) {
 
 static void hogp_create(struct HOGPDevice* hog) {
 	static const char* flags_read[] = {"read", NULL};
-	hog->pnp_id.source = 2;
+	hog->pnp_data.source = 2;
+	hog->hid_info_data.bcdHID = htobs(0x111);
+	hog->hid_info_data.bCountryCode = 0;
+	hog->hid_info_data.flags = 0;
 
 	gatt_service_create(&hog->devinfo, UUID_DEV_INFO, "/com/valvesoftware/Deck/service0");
 	gatt_characteristic_create(&hog->pnp, UUID_PNP_ID, &hog->devinfo);
 	hog->pnp.flags = flags_read;
-	hog->pnp.data = &hog->pnp_id;
-	hog->pnp.size = sizeof(hog->pnp_id);
+	hog->pnp.data = &hog->pnp_data;
+	hog->pnp.size = sizeof(hog->pnp_data);
 
 	gatt_service_create(&hog->hid, UUID_HID, "/com/valvesoftware/Deck/service1");
-	//gatt_characteristic_create(&hog->hid_info, UUID_HID_INFO, &hog->hid);
+	gatt_characteristic_create(&hog->hid_info, UUID_HID_INFO, &hog->hid);
+	hog->hid_info.flags = flags_read;
+	hog->hid_info.data = &hog->hid_info_data;
+	hog->hid_info.size = sizeof(hog->hid_info_data);
 	//gatt_characteristic_create(&hog->report_map, UUID_REPORT_MAP, &hog->hid);
 	//gatt_characteristic_create(&hog->hid_control, UUID_HID_CONTROL, &hog->hid);
 	//gatt_characteristic_create(&hog->report, UUID_REPORT, &hog->hid);
-	//gatt_characteristic_create(&hog->protocol_mode, UUID_PROTOCOL_MODE, &hog->hid);
 
 	gatt_service_create(&hog->battery, UUID_BATTERY, "/com/valvesoftware/Deck/service2");
 }
