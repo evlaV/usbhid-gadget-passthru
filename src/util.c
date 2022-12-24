@@ -110,6 +110,37 @@ bool cp_prop_hex(const char* restrict indir, const char* inpath, const char* res
 	return true;
 }
 
+bool read_u16(int fd, uint16_t* out) {
+	char buf[4];
+	int data = 0;
+	size_t i;
+
+	ssize_t size = read(fd, buf, 4);
+	if (size < 4) {
+		return false;
+	}
+
+	for (i = 0; i < 4; ++i) {
+		data <<= 4;
+		switch (buf[i]) {
+		case '0' ... '9':
+			data |= buf[i] - '0';
+			break;
+		case 'a' ... 'f':
+			data |= buf[i] - 'a' + 10;
+			break;
+		case 'A' ... 'F':
+			data |= buf[i] - 'A' + 10;
+			break;
+		default:
+			return false;
+		}
+	}
+
+	*out = data;
+	return true;
+}
+
 void buffer_create(struct Buffer* buf) {
 	memset(buf, 0, sizeof(*buf));
 }

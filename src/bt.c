@@ -17,6 +17,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/fcntl.h>
 #include <unistd.h>
 
 #define HIDP_CONTROL_PSM 0x11
@@ -271,11 +272,13 @@ int main(int argc, char* argv[]) {
 	char syspath[PATH_MAX];
 	char bus_id[32];
 	char gatt_manager[PATH_MAX];
+	uint16_t u16;
 	const char* name;
 	struct sigaction sa;
 	int ok = 1;
 	int intr = -1;
 	int ctrl = -1;
+	int fd = -1;
 	int hci;
 	sd_bus* bus;
 	sd_bus_slot* object_manager_slot = NULL;
@@ -309,6 +312,7 @@ int main(int argc, char* argv[]) {
 		return 1;
 	}
 
+	/* Set up D-Bus/BlueZ */
 	hci = hci_get_route(NULL); /* TODO: Allow passing HCI address? */
 	if (hci < 0) {
 		perror("Failed to get default HCI");
@@ -330,7 +334,31 @@ int main(int argc, char* argv[]) {
 		goto shutdown;
 	}
 
+	/* Create HoG device */
 	hogp_create(&hog);
+
+	fd = vopen("%s/idVendor", O_RDONLY, 0666, syspath);
+	if (fd < 0) {
+		goto shutdown;
+	}
+	if (!read_u16(fd, &u16)) {
+		close(fd);
+		goto shutdown;
+	}
+	hog.pnp_data.vid = u16;
+	close(fd);
+
+	fd = vopen("%s/idProduct", O_RDONLY, 0666, syspath);
+	if (fd < 0) {
+		goto shutdown;
+	}
+	if (!read_u16(fd, &u16)) {
+		close(fd);
+		goto shutdown;
+	}
+	hog.pnp_data.pid = u16;
+	close(fd);
+	/* TODO: Connect USB device to HoG characteristics */
 
 	res = hogp_register(&hog, bus);
 	if (res < 0) {
@@ -338,6 +366,7 @@ int main(int argc, char* argv[]) {
 		goto shutdown;
 	}
 
+	/* Publish all of it */
 	res = sd_bus_add_object_vtable(bus, &advert_slot, "/com/valvesoftware/Deck/advert",
 		 "org.bluez.LEAdvertisement1", le_advertisement, &advertisement);
 	if (res < 0) {

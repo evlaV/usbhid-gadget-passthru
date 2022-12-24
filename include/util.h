@@ -2,6 +2,7 @@
 #pragma once
 
 #include <stdbool.h>
+#include <stdint.h>
 
 struct Buffer {
 	void* data;
@@ -12,6 +13,8 @@ __attribute__((format(printf, 1, 3))) int vmkdir(const char* pattern, int mode, 
 __attribute__((format(printf, 1, 4))) int vopen(const char* pattern, int flags, int mode, ...);
 bool cp_prop(const char* restrict indir, const char* inpath, const char* restrict outdir, const char* outpath);
 bool cp_prop_hex(const char* restrict indir, const char* inpath, const char* restrict outdir, const char* outpath);
+
+bool read_u16(int fd, uint16_t* out);
 
 void buffer_create(struct Buffer*);
 void buffer_destroy(struct Buffer*);
