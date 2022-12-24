@@ -30,17 +30,13 @@ int vopen(const char* pattern, int flags, int mode, ...) {
 }
 
 bool cp_prop(const char* restrict indir, const char* inpath, const char* restrict outdir, const char* outpath) {
-	char in[PATH_MAX];
-	char out[PATH_MAX];
 	char buf[2048];
 	ssize_t size;
 	int infd = -1;
 	int outfd = -1;
 
-	snprintf(in, sizeof(in), "%s/%s", indir, inpath);
-	snprintf(out, sizeof(out), "%s/%s", outdir, outpath);
-	infd = open(in, O_RDONLY);
-	outfd = open(out, O_WRONLY | O_TRUNC, 0644);
+	infd = vopen("%s/%s", O_RDONLY, 0666, indir, inpath);
+	outfd = vopen("%s/%s", O_WRONLY | O_TRUNC, 0644, outdir, outpath);
 
 	if (infd < 0) {
 		perror("Failed to open property input");
@@ -68,17 +64,13 @@ bool cp_prop(const char* restrict indir, const char* inpath, const char* restric
 }
 
 bool cp_prop_hex(const char* restrict indir, const char* inpath, const char* restrict outdir, const char* outpath) {
-	char in[PATH_MAX];
-	char out[PATH_MAX];
-	char buf[2048];
+	char buf[32];
 	ssize_t size;
 	int infd = -1;
 	int outfd = -1;
 
-	snprintf(in, sizeof(in), "%s/%s", indir, inpath);
-	snprintf(out, sizeof(out), "%s/%s", outdir, outpath);
-	infd = open(in, O_RDONLY);
-	outfd = open(out, O_WRONLY | O_TRUNC, 0644);
+	infd = vopen("%s/%s", O_RDONLY, 0666, indir, inpath);
+	outfd = vopen("%s/%s", O_WRONLY | O_TRUNC, 0644, outdir, outpath);
 
 	if (infd < 0) {
 		perror("Failed to open property input");
