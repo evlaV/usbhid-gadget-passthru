@@ -50,18 +50,17 @@ static int parse_flags(sd_bus_message* m, size_t* offset, size_t* length, const 
 	}
 
 	while ((res = sd_bus_message_enter_container(m, 'e', "sv")) > 0) {
+		char type;
 		res = sd_bus_message_read(m, "s", &opt);
 		if (res < 0) {
 			return res;
 		}
-		puts(opt);
+		res = sd_bus_message_peek_type(m, &type, NULL);
+		if (res < 0) {
+			return res;
+		}
 		if (strcasecmp(opt, "offset") == 0) {
-			char type;
 			uint16_t read_offset;
-			res = sd_bus_message_peek_type(m, &type, NULL);
-			if (res < 0) {
-				return res;
-			}
 			if (type != 'q') {
 				return -EINVAL;
 			}
@@ -76,6 +75,9 @@ static int parse_flags(sd_bus_message* m, size_t* offset, size_t* length, const 
 			}
 			*offset = read_offset;
 			*length -= read_offset;
+		} else {
+			printf("Unhandled flag: %s : %c\n", opt, type);
+			sd_bus_message_skip(m, NULL);
 		}
 
 		res = sd_bus_message_exit_container(m);
