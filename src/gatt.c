@@ -10,6 +10,7 @@
 static int read_characteristic(sd_bus_message* m, void *userdata, sd_bus_error* error);
 static int read_descriptor(sd_bus_message* m, void *userdata, sd_bus_error* error);
 
+static int read_flags(sd_bus*, const char*, const char*, const char*, sd_bus_message* reply, void* userdata, sd_bus_error*);
 static int read_service_path(sd_bus*, const char*, const char*, const char*, sd_bus_message* reply, void* userdata, sd_bus_error*);
 static int read_characteristic_path(sd_bus*, const char*, const char*, const char*, sd_bus_message* reply, void* userdata, sd_bus_error*);
 
@@ -24,7 +25,7 @@ static const sd_bus_vtable gatt_characteristic[] = {
 	SD_BUS_VTABLE_START(0),
 	SD_BUS_PROPERTY("UUID", "s", read_string, offsetof(struct GattCharacteristic, uuid), SD_BUS_VTABLE_PROPERTY_CONST),
 	SD_BUS_PROPERTY("Service", "o", read_service_path, 0, SD_BUS_VTABLE_PROPERTY_CONST),
-	SD_BUS_PROPERTY("Flags", "as", read_string_array, offsetof(struct GattCharacteristic, flags), SD_BUS_VTABLE_PROPERTY_CONST),
+	SD_BUS_PROPERTY("Flags", "as", read_flags, offsetof(struct GattCharacteristic, flags), SD_BUS_VTABLE_PROPERTY_CONST),
 	SD_BUS_PROPERTY("MTU", "q", read_uint16, offsetof(struct GattCharacteristic, mtu), SD_BUS_VTABLE_PROPERTY_CONST),
 	SD_BUS_METHOD_WITH_ARGS("ReadValue", "a{sv}", "ay", read_characteristic, 0),
 	SD_BUS_VTABLE_END
@@ -34,7 +35,7 @@ static const sd_bus_vtable gatt_descriptor[] = {
 	SD_BUS_VTABLE_START(0),
 	SD_BUS_PROPERTY("UUID", "s", read_string, offsetof(struct GattDescriptor, uuid), SD_BUS_VTABLE_PROPERTY_CONST),
 	SD_BUS_PROPERTY("Characteristic", "o", read_characteristic_path, 0, SD_BUS_VTABLE_PROPERTY_CONST),
-	SD_BUS_PROPERTY("Flags", "as", read_string_array, offsetof(struct GattDescriptor, flags), SD_BUS_VTABLE_PROPERTY_CONST),
+	SD_BUS_PROPERTY("Flags", "as", read_flags, offsetof(struct GattDescriptor, flags), SD_BUS_VTABLE_PROPERTY_CONST),
 	SD_BUS_METHOD_WITH_ARGS("ReadValue", "a{sv}", "ay", read_descriptor, 0),
 	SD_BUS_VTABLE_END
 };
@@ -100,6 +101,10 @@ static int read_characteristic(sd_bus_message* m, void *userdata, sd_bus_error* 
 	size_t length = characteristic->data.size;
 	sd_bus_message* reply;
 
+	if (!(characteristic->flags & GATT_FLAG_READ)) {
+		return sd_bus_error_set(error, "org.bluez.Error.NotSupported", "Reading not supported");
+	}
+
 	res = parse_flags(m, &offset, &length, "characteristic", error);
 	if (res < 0 || sd_bus_error_is_set(error)) {
 		return res;
@@ -125,6 +130,10 @@ static int read_descriptor(sd_bus_message* m, void *userdata, sd_bus_error* erro
 	size_t length = descriptor->data.size;
 	sd_bus_message* reply;
 
+	if (!(descriptor->flags & GATT_FLAG_READ)) {
+		return sd_bus_error_set(error, "org.bluez.Error.NotSupported", "Reading not supported");
+	}
+
 	res = parse_flags(m, &offset, &length, "descriptor", error);
 	if (res < 0 || sd_bus_error_is_set(error)) {
 		return res;
@@ -141,6 +150,46 @@ static int read_descriptor(sd_bus_message* m, void *userdata, sd_bus_error* erro
 	}
 
 	return sd_bus_message_send(reply);
+}
+
+static int read_flags(sd_bus*, const char*, const char*, const char*, sd_bus_message* reply, void* userdata, sd_bus_error*) {
+	uint32_t flags = *(uint32_t*) userdata;
+	int res;
+
+	res = sd_bus_message_open_container(reply, 'a', "s");
+	if (res < 0) {
+		return res;
+	}
+
+	if (flags & GATT_FLAG_READ) {
+		res = sd_bus_message_append(reply, "s", "read");
+		if (res < 0) {
+			return res;
+		}
+	}
+
+	if (flags & GATT_FLAG_WRITE) {
+		res = sd_bus_message_append(reply, "s", "write");
+		if (res < 0) {
+			return res;
+		}
+	}
+
+	if (flags & GATT_FLAG_WRITE_NO_RESPONSE) {
+		res = sd_bus_message_append(reply, "s", "write-without-response");
+		if (res < 0) {
+			return res;
+		}
+	}
+
+	if (flags & GATT_FLAG_NOTIFY) {
+		res = sd_bus_message_append(reply, "s", "notify");
+		if (res < 0) {
+			return res;
+		}
+	}
+
+	return sd_bus_message_close_container(reply);
 }
 
 static int read_service_path(sd_bus*, const char*, const char*, const char*, sd_bus_message* reply, void* userdata, sd_bus_error*) {

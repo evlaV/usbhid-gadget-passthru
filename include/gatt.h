@@ -10,10 +10,18 @@
 struct GattService;
 struct GattDescriptor;
 
+enum {
+	GATT_FLAG_READ = 1,
+	GATT_FLAG_WRITE = 2,
+	GATT_FLAG_RW = 3,
+	GATT_FLAG_NOTIFY = 4,
+	GATT_FLAG_WRITE_NO_RESPONSE = 8,
+};
+
 struct GattDescriptor {
 	char uuid[37];
 	struct GattCharacteristic* characteristic;
-	const char** flags;
+	uint32_t flags;
 	struct Buffer data;
 
 	sd_bus_slot* slot;
@@ -22,7 +30,7 @@ struct GattDescriptor {
 struct GattCharacteristic {
 	char uuid[37];
 	struct GattService* service;
-	const char** flags;
+	uint32_t flags;
 	uint16_t mtu;
 	struct Buffer data;
 
