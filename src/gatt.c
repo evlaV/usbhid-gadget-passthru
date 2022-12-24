@@ -97,7 +97,7 @@ static int read_characteristic(sd_bus_message* m, void *userdata, sd_bus_error* 
 	struct GattCharacteristic* characteristic = userdata;
 	int res;
 	size_t offset = 0;
-	size_t length = characteristic->size;
+	size_t length = characteristic->data.size;
 	sd_bus_message* reply;
 
 	res = parse_flags(m, &offset, &length, "characteristic", error);
@@ -110,7 +110,7 @@ static int read_characteristic(sd_bus_message* m, void *userdata, sd_bus_error* 
 		return res;
 	}
 
-	res = sd_bus_message_append_array(reply, 'y', &((uint8_t*) characteristic->data)[offset], length);
+	res = sd_bus_message_append_array(reply, 'y', &((uint8_t*) characteristic->data.data)[offset], length);
 	if (res < 0) {
 		return res;
 	}
@@ -122,7 +122,7 @@ static int read_descriptor(sd_bus_message* m, void *userdata, sd_bus_error* erro
 	struct GattDescriptor* descriptor = userdata;
 	int res;
 	size_t offset = 0;
-	size_t length = descriptor->size;
+	size_t length = descriptor->data.size;
 	sd_bus_message* reply;
 
 	res = parse_flags(m, &offset, &length, "descriptor", error);
@@ -135,7 +135,7 @@ static int read_descriptor(sd_bus_message* m, void *userdata, sd_bus_error* erro
 		return res;
 	}
 
-	res = sd_bus_message_append_array(reply, 'y', &((uint8_t*) descriptor->data)[offset], length);
+	res = sd_bus_message_append_array(reply, 'y', &((uint8_t*) descriptor->data.data)[offset], length);
 	if (res < 0) {
 		return res;
 	}

@@ -3,6 +3,8 @@
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include <sys/fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -108,3 +110,26 @@ bool cp_prop_hex(const char* restrict indir, const char* inpath, const char* res
 	return true;
 }
 
+void buffer_create(struct Buffer* buf) {
+	memset(buf, 0, sizeof(*buf));
+}
+
+void buffer_destroy(struct Buffer* buf) {
+	free(buf->data);
+	memset(buf, 0, sizeof(*buf));
+}
+
+void buffer_alloc(struct Buffer* buf, size_t size) {
+	buf->data = calloc(1, size);
+	buf->size = size;
+}
+
+void buffer_realloc(struct Buffer* buf, size_t size) {
+	void* new_buf = realloc(buf->data, size);
+	if (!new_buf) {
+		buffer_destroy(buf);
+		return;
+	}
+	buf->data = new_buf;
+	buf->size = size;
+}

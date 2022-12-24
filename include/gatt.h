@@ -2,6 +2,7 @@
 #pragma once
 
 #include "dbus.h"
+#include "util.h"
 
 #define MAX_GATT_CHAR 16
 #define MAX_GATT_DESC 16
@@ -13,8 +14,7 @@ struct GattDescriptor {
 	char uuid[37];
 	struct GattCharacteristic* characteristic;
 	const char** flags;
-	void* data;
-	size_t size;
+	struct Buffer data;
 
 	sd_bus_slot* slot;
 };
@@ -24,8 +24,7 @@ struct GattCharacteristic {
 	struct GattService* service;
 	const char** flags;
 	uint16_t mtu;
-	void* data;
-	size_t size;
+	struct Buffer data;
 
 	struct GattDescriptor* descriptors[MAX_GATT_DESC];
 	size_t nDescriptors;
