@@ -166,7 +166,7 @@ static int create_server(uint16_t psm) {
 	return sock;
 }
 
-static void hogp_create(struct HOGPDevice* hog) {
+void hogp_create(struct HOGPDevice* hog) {
 	hog->pnp_data.source = 2;
 	hog->hid_info_data.bcdHID = htobs(0x111);
 	hog->hid_info_data.bCountryCode = 0;
@@ -233,6 +233,15 @@ static void hogp_create(struct HOGPDevice* hog) {
 	hog->battery_level.flags = GATT_FLAG_READ;
 	hog->battery_level.data.data = "100%";
 	hog->battery_level.data.size = 4;
+}
+
+void hogp_destroy(struct HOGPDevice* hog) {
+	gatt_service_destroy(&hog->devinfo);
+	gatt_service_destroy(&hog->hid);
+	gatt_service_destroy(&hog->battery);
+	buffer_destroy(&hog->input_report.data);
+	buffer_destroy(&hog->output_report.data);
+	buffer_destroy(&hog->feature_report.data);
 }
 
 static int hogp_register(struct HOGPDevice* hog, sd_bus* bus) {
@@ -433,10 +442,8 @@ shutdown:
 		&error, &reply, "o", "/com/valvesoftware/Deck");
 	sd_bus_slot_unref(object_manager_slot);
 	sd_bus_slot_unref(register_service_slot);
-	sd_bus_slot_unref(hog.devinfo.slot);
-	sd_bus_slot_unref(hog.hid.slot);
+	hogp_destroy(&hog);
 	sd_bus_slot_unref(profile_slot);
-	sd_bus_slot_unref(hog.pnp.slot);
 	sd_bus_slot_unref(register_advert_slot);
 	sd_bus_slot_unref(advert_slot);
 	sd_bus_unref(bus);

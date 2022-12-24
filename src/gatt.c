@@ -220,6 +220,18 @@ void gatt_service_create(struct GattService* service, const char* uuid, const ch
 	service->path = path;
 }
 
+void gatt_service_destroy(struct GattService* service) {
+	size_t i, j;
+	for (i = 0; i < service->nCharacteristics; ++i) {
+		struct GattCharacteristic* characteristic = service->characteristics[i];
+		sd_bus_slot_unref(characteristic->slot);
+		for (j = 0; j < characteristic->nDescriptors; ++j) {
+			sd_bus_slot_unref(characteristic->descriptors[j]->slot);
+		}
+	}
+	sd_bus_slot_unref(service->slot);
+}
+
 int gatt_service_register(struct GattService* service, sd_bus* bus) {
 	size_t i, j;
 	int res = sd_bus_add_object_vtable(bus, &service->slot, service->path,

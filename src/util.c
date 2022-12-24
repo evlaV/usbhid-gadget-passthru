@@ -115,7 +115,9 @@ void buffer_create(struct Buffer* buf) {
 }
 
 void buffer_destroy(struct Buffer* buf) {
-	free(buf->data);
+	if (buf->data) {
+		free(buf->data);
+	}
 	memset(buf, 0, sizeof(*buf));
 }
 
