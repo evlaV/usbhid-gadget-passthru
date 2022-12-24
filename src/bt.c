@@ -27,6 +27,7 @@
 #define UUID_HID "00001812-0000-1000-8000-00805f9b34fb"
 
 #define UUID_REPORT_REFERENCE "00002908-0000-1000-8000-00805f9b34fb"
+#define UUID_BATTERY_LEVEL "00002a19-0000-1000-8000-00805f9b34fb"
 
 #define UUID_HID_INFO "00002a4a-0000-1000-8000-00805f9b34fb"
 #define UUID_REPORT_MAP "00002a4b-0000-1000-8000-00805f9b34fb"
@@ -88,6 +89,8 @@ struct HOGPDevice {
 	struct GattCharacteristic input_report;
 	struct GattCharacteristic output_report;
 	struct GattCharacteristic feature_report;
+
+	struct GattCharacteristic battery_level;
 
 	struct GattDescriptor input_report_reference;
 	struct GattDescriptor input_report_client_config;
@@ -168,6 +171,7 @@ static void hogp_create(struct HOGPDevice* hog) {
 	static const char* flags_rw[] = {"read", "write", NULL};
 	static const char* flags_rw_notify[] = {"read", "write", "notify", NULL};
 	static const char* flags_rw_write_no_reply[] = {"read", "write", "write-without-response", NULL};
+	static const char* flags_write_no_reply[] = {"write-without-response", NULL};
 
 	hog->pnp_data.source = 2;
 	hog->hid_info_data.bcdHID = htobs(0x111);
@@ -186,46 +190,55 @@ static void hogp_create(struct HOGPDevice* hog) {
 	gatt_service_create(&hog->devinfo, UUID_DEV_INFO, "/com/valvesoftware/Deck/service0");
 	gatt_characteristic_create(&hog->pnp, UUID_PNP_ID, &hog->devinfo);
 	hog->pnp.flags = flags_read;
-	hog->pnp.data = &hog->pnp_data;
-	hog->pnp.size = sizeof(hog->pnp_data);
+	hog->pnp.data.data = &hog->pnp_data;
+	hog->pnp.data.size = sizeof(hog->pnp_data);
 
 	gatt_service_create(&hog->hid, UUID_HID, "/com/valvesoftware/Deck/service1");
 	gatt_characteristic_create(&hog->hid_info, UUID_HID_INFO, &hog->hid);
 	hog->hid_info.flags = flags_read;
-	hog->hid_info.data = &hog->hid_info_data;
-	hog->hid_info.size = sizeof(hog->hid_info_data);
-	//gatt_characteristic_create(&hog->report_map, UUID_REPORT_MAP, &hog->hid);
-	//gatt_characteristic_create(&hog->hid_control, UUID_HID_CONTROL, &hog->hid);
+	hog->hid_info.data.data = &hog->hid_info_data;
+	hog->hid_info.data.size = sizeof(hog->hid_info_data);
 
-	//gatt_characteristic_create(&hog->input_report, UUID_REPORT, &hog->hid);
+	gatt_characteristic_create(&hog->report_map, UUID_REPORT_MAP, &hog->hid);
+	hog->report_map.flags = flags_read;
+	buffer_create(&hog->report_map.data);
+
+	gatt_characteristic_create(&hog->hid_control, UUID_HID_CONTROL, &hog->hid);
+	hog->hid_control.flags = flags_write_no_reply;
+	buffer_create(&hog->hid_control.data);
+
+	gatt_characteristic_create(&hog->input_report, UUID_REPORT, &hog->hid);
 	hog->input_report.flags = flags_rw_notify;
-	hog->input_report.data = NULL;
-	hog->input_report.size = 0;
-	//gatt_characteristic_create(&hog->output_report, UUID_REPORT, &hog->hid);
+	buffer_create(&hog->input_report.data);
+
+	gatt_characteristic_create(&hog->output_report, UUID_REPORT, &hog->hid);
 	hog->output_report.flags = flags_rw_write_no_reply;
-	hog->output_report.data = NULL;
-	hog->output_report.size = 0;
-	//gatt_characteristic_create(&hog->feature_report, UUID_REPORT, &hog->hid);
+	buffer_create(&hog->output_report.data);
+
+	gatt_characteristic_create(&hog->feature_report, UUID_REPORT, &hog->hid);
 	hog->feature_report.flags = flags_rw;
-	hog->feature_report.data = NULL;
-	hog->feature_report.size = 0;
+	buffer_create(&hog->feature_report.data);
 
 	gatt_descriptor_create(&hog->input_report_reference, UUID_REPORT_REFERENCE, &hog->input_report);
 	hog->input_report_reference.flags = flags_read;
-	hog->input_report_reference.data = &hog->input_report_reference_data;
-	hog->input_report_reference.size = sizeof(hog->input_report_reference_data);
+	hog->input_report_reference.data.data = &hog->input_report_reference_data;
+	hog->input_report_reference.data.size = sizeof(hog->input_report_reference_data);
 
-	gatt_descriptor_create(&hog->input_report_reference, UUID_REPORT_REFERENCE, &hog->output_report);
+	gatt_descriptor_create(&hog->output_report_reference, UUID_REPORT_REFERENCE, &hog->output_report);
 	hog->output_report_reference.flags = flags_read;
-	hog->output_report_reference.data = &hog->output_report_reference_data;
-	hog->output_report_reference.size = sizeof(hog->output_report_reference_data);
+	hog->output_report_reference.data.data = &hog->output_report_reference_data;
+	hog->output_report_reference.data.size = sizeof(hog->output_report_reference_data);
 
-	gatt_descriptor_create(&hog->input_report_reference, UUID_REPORT_REFERENCE, &hog->feature_report);
+	gatt_descriptor_create(&hog->feature_report_reference, UUID_REPORT_REFERENCE, &hog->feature_report);
 	hog->feature_report_reference.flags = flags_read;
-	hog->feature_report_reference.data = &hog->feature_report_reference_data;
-	hog->feature_report_reference.size = sizeof(hog->feature_report_reference_data);
+	hog->feature_report_reference.data.data = &hog->feature_report_reference_data;
+	hog->feature_report_reference.data.size = sizeof(hog->feature_report_reference_data);
 
 	gatt_service_create(&hog->battery, UUID_BATTERY, "/com/valvesoftware/Deck/service2");
+	gatt_characteristic_create(&hog->battery_level, UUID_PNP_ID, &hog->battery);
+	hog->battery_level.flags = flags_read;
+	hog->battery_level.data.data = "100%";
+	hog->battery_level.data.size = 4;
 }
 
 static int hogp_register(struct HOGPDevice* hog, sd_bus* bus) {
@@ -245,7 +258,7 @@ static int hogp_register(struct HOGPDevice* hog, sd_bus* bus) {
 
 	res = gatt_service_register(&hog->battery, bus);
 	if (res < 0) {
-		printf("Failed to publish HID service: %s\n", strerror(-res));
+		printf("Failed to publish battery service: %s\n", strerror(-res));
 		return res;
 	}
 	return 0;
@@ -255,6 +268,7 @@ int main(int argc, char* argv[]) {
 	char syspath[PATH_MAX];
 	char bus_id[32];
 	char gatt_manager[PATH_MAX];
+	const char* name;
 	struct sigaction sa;
 	int ok = 1;
 	int intr = -1;
@@ -272,7 +286,7 @@ int main(int argc, char* argv[]) {
 	struct HOGPDevice hog;
 	struct LEAdvertisement advertisement = {
 		.type = "peripheral",
-		.uuids = (const char*[]) {UUID_DEV_INFO, UUID_HID, NULL},
+		.uuids = (const char*[]) {UUID_DEV_INFO, UUID_HID, UUID_BATTERY, NULL},
 		.local_name = "USB Gamepad",
 		.appearance = GAP_GAMEPAD,
 	};
@@ -367,6 +381,10 @@ int main(int argc, char* argv[]) {
 	sigaction(SIGINT, &sa, NULL);
 	sigaction(SIGHUP, &sa, NULL);
 
+	if (sd_bus_get_unique_name(bus, &name) == 0) {
+		printf("name: %s\n", name);
+	}
+
 	ok = 0;
 	while (!did_hup) {
 		sd_bus_message* m;
@@ -376,11 +394,11 @@ int main(int argc, char* argv[]) {
 			break;
 		}
 		if (m) {
+			puts("");
 			printf("path: %s\n", sd_bus_message_get_path(m));
 			printf("iface: %s\n", sd_bus_message_get_interface(m));
 			printf("member: %s\n", sd_bus_message_get_member(m));
 			printf("sender: %s\n", sd_bus_message_get_sender(m));
-			puts("");
 			sd_bus_message_unref(m);
 		}
 		if (res > 0) {

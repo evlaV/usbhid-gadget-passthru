@@ -39,6 +39,8 @@ src/dbus.o: include/dbus.h
 src/gatt.o: include/dbus.h include/gatt.h
 src/udc.o: include/dev.h include/log.h include/options.h include/usb.h include/util.h
 
+include/gatt.h: include/dbus.h
+
 src/bt.o: CFLAGS += $(BLUEZ_CFLAGS) $(SDBUS_CFLAGS)
 src/dbus.o src/gatt.o: CFLAGS += $(SDBUS_CFLAGS)
 
