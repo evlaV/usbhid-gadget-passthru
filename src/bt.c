@@ -167,12 +167,6 @@ static int create_server(uint16_t psm) {
 }
 
 static void hogp_create(struct HOGPDevice* hog) {
-	static const char* flags_read[] = {"read", NULL};
-	static const char* flags_rw[] = {"read", "write", NULL};
-	static const char* flags_rw_notify[] = {"read", "write", "notify", NULL};
-	static const char* flags_rw_write_no_reply[] = {"read", "write", "write-without-response", NULL};
-	static const char* flags_write_no_reply[] = {"write-without-response", NULL};
-
 	hog->pnp_data.source = 2;
 	hog->hid_info_data.bcdHID = htobs(0x111);
 	hog->hid_info_data.bCountryCode = 0;
@@ -189,54 +183,54 @@ static void hogp_create(struct HOGPDevice* hog) {
 
 	gatt_service_create(&hog->devinfo, UUID_DEV_INFO, "/com/valvesoftware/Deck/service0");
 	gatt_characteristic_create(&hog->pnp, UUID_PNP_ID, &hog->devinfo);
-	hog->pnp.flags = flags_read;
+	hog->pnp.flags = GATT_FLAG_READ;
 	hog->pnp.data.data = &hog->pnp_data;
 	hog->pnp.data.size = sizeof(hog->pnp_data);
 
 	gatt_service_create(&hog->hid, UUID_HID, "/com/valvesoftware/Deck/service1");
 	gatt_characteristic_create(&hog->hid_info, UUID_HID_INFO, &hog->hid);
-	hog->hid_info.flags = flags_read;
+	hog->hid_info.flags = GATT_FLAG_READ;
 	hog->hid_info.data.data = &hog->hid_info_data;
 	hog->hid_info.data.size = sizeof(hog->hid_info_data);
 
 	gatt_characteristic_create(&hog->report_map, UUID_REPORT_MAP, &hog->hid);
-	hog->report_map.flags = flags_read;
+	hog->report_map.flags = GATT_FLAG_READ;
 	buffer_create(&hog->report_map.data);
 
 	gatt_characteristic_create(&hog->hid_control, UUID_HID_CONTROL, &hog->hid);
-	hog->hid_control.flags = flags_write_no_reply;
+	hog->hid_control.flags = GATT_FLAG_WRITE_NO_RESPONSE;
 	buffer_create(&hog->hid_control.data);
 
 	gatt_characteristic_create(&hog->input_report, UUID_REPORT, &hog->hid);
-	hog->input_report.flags = flags_rw_notify;
+	hog->input_report.flags = GATT_FLAG_RW | GATT_FLAG_NOTIFY;
 	buffer_create(&hog->input_report.data);
 
 	gatt_characteristic_create(&hog->output_report, UUID_REPORT, &hog->hid);
-	hog->output_report.flags = flags_rw_write_no_reply;
+	hog->output_report.flags = GATT_FLAG_RW | GATT_FLAG_WRITE_NO_RESPONSE;
 	buffer_create(&hog->output_report.data);
 
 	gatt_characteristic_create(&hog->feature_report, UUID_REPORT, &hog->hid);
-	hog->feature_report.flags = flags_rw;
+	hog->feature_report.flags = GATT_FLAG_RW;
 	buffer_create(&hog->feature_report.data);
 
 	gatt_descriptor_create(&hog->input_report_reference, UUID_REPORT_REFERENCE, &hog->input_report);
-	hog->input_report_reference.flags = flags_read;
+	hog->input_report_reference.flags = GATT_FLAG_READ;
 	hog->input_report_reference.data.data = &hog->input_report_reference_data;
 	hog->input_report_reference.data.size = sizeof(hog->input_report_reference_data);
 
 	gatt_descriptor_create(&hog->output_report_reference, UUID_REPORT_REFERENCE, &hog->output_report);
-	hog->output_report_reference.flags = flags_read;
+	hog->output_report_reference.flags = GATT_FLAG_READ;
 	hog->output_report_reference.data.data = &hog->output_report_reference_data;
 	hog->output_report_reference.data.size = sizeof(hog->output_report_reference_data);
 
 	gatt_descriptor_create(&hog->feature_report_reference, UUID_REPORT_REFERENCE, &hog->feature_report);
-	hog->feature_report_reference.flags = flags_read;
+	hog->feature_report_reference.flags = GATT_FLAG_READ;
 	hog->feature_report_reference.data.data = &hog->feature_report_reference_data;
 	hog->feature_report_reference.data.size = sizeof(hog->feature_report_reference_data);
 
 	gatt_service_create(&hog->battery, UUID_BATTERY, "/com/valvesoftware/Deck/service2");
 	gatt_characteristic_create(&hog->battery_level, UUID_PNP_ID, &hog->battery);
-	hog->battery_level.flags = flags_read;
+	hog->battery_level.flags = GATT_FLAG_READ;
 	hog->battery_level.data.data = "100%";
 	hog->battery_level.data.size = 4;
 }
