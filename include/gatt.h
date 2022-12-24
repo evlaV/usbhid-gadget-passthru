@@ -52,6 +52,7 @@ struct GattService {
 };
 
 void gatt_service_create(struct GattService* service, const char* uuid, const char* path);
+void gatt_service_destroy(struct GattService* service);
 int gatt_service_register(struct GattService* service, sd_bus* bus);
 
 void gatt_characteristic_create(struct GattCharacteristic* characteristic, const char* uuid, struct GattService* parent);
