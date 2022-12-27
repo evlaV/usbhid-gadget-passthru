@@ -44,6 +44,7 @@
 #define REPORT_TYPE_FEATURE 3
 
 #define DESCRIPTOR_SIZE_MAX 4096
+#define INTERFACES_MAX 8
 
 bool did_hup = false;
 bool did_error = false;
@@ -79,12 +80,8 @@ struct ReportReference {
 	uint8_t reportType;
 };
 
-struct HOGPDevice {
-	struct GattService devinfo;
+struct HOGPInterface {
 	struct GattService hid;
-	struct GattService battery;
-
-	struct GattCharacteristic pnp;
 
 	struct GattCharacteristic hid_info;
 	struct GattCharacteristic report_map;
@@ -93,19 +90,29 @@ struct HOGPDevice {
 	struct GattCharacteristic output_report;
 	struct GattCharacteristic feature_report;
 
-	struct GattCharacteristic battery_level;
-
 	struct GattDescriptor input_report_reference;
 	struct GattDescriptor input_report_client_config;
 	struct GattDescriptor output_report_reference;
 	struct GattDescriptor feature_report_reference;
 
-	struct PnPID pnp_data;
 	struct HIDInfo hid_info_data;
 
 	struct ReportReference input_report_reference_data;
 	struct ReportReference output_report_reference_data;
 	struct ReportReference feature_report_reference_data;
+};
+
+struct HOGPDevice {
+	struct HOGPInterface interface[INTERFACES_MAX];
+	size_t nInterfaces;
+
+	struct GattService devinfo;
+	struct GattService battery;
+
+	struct GattCharacteristic pnp;
+	struct GattCharacteristic battery_level;
+
+	struct PnPID pnp_data;
 };
 
 static const sd_bus_vtable gatt_profile[] = {
@@ -169,85 +176,107 @@ static int create_server(uint16_t psm) {
 	return sock;
 }
 
-void hogp_create(struct HOGPDevice* hog) {
+void hogp_create_interface(struct HOGPInterface* iface) {
+	iface->hid_info_data.bcdHID = htobs(0x111);
+	iface->hid_info_data.bCountryCode = 0;
+	iface->hid_info_data.flags = 0;
+
+	iface->input_report_reference_data.reportId = 0;
+	iface->input_report_reference_data.reportType = REPORT_TYPE_INPUT;
+
+	iface->output_report_reference_data.reportId = 0;
+	iface->output_report_reference_data.reportType = REPORT_TYPE_OUTPUT;
+
+	iface->feature_report_reference_data.reportId = 0;
+	iface->feature_report_reference_data.reportType = REPORT_TYPE_FEATURE;
+
+	gatt_characteristic_create(&iface->hid_info, UUID_HID_INFO, &iface->hid);
+	iface->hid_info.flags = GATT_FLAG_READ;
+	iface->hid_info.data.data = &iface->hid_info_data;
+	iface->hid_info.data.size = sizeof(iface->hid_info_data);
+
+	gatt_characteristic_create(&iface->report_map, UUID_REPORT_MAP, &iface->hid);
+	iface->report_map.flags = GATT_FLAG_READ;
+	buffer_create(&iface->report_map.data);
+
+	gatt_characteristic_create(&iface->hid_control, UUID_HID_CONTROL, &iface->hid);
+	iface->hid_control.flags = GATT_FLAG_WRITE_NO_RESPONSE;
+	buffer_create(&iface->hid_control.data);
+
+	gatt_characteristic_create(&iface->input_report, UUID_REPORT, &iface->hid);
+	iface->input_report.flags = GATT_FLAG_RW | GATT_FLAG_NOTIFY;
+	buffer_create(&iface->input_report.data);
+
+	gatt_characteristic_create(&iface->output_report, UUID_REPORT, &iface->hid);
+	iface->output_report.flags = GATT_FLAG_RW | GATT_FLAG_WRITE_NO_RESPONSE;
+	buffer_create(&iface->output_report.data);
+
+	gatt_characteristic_create(&iface->feature_report, UUID_REPORT, &iface->hid);
+	iface->feature_report.flags = GATT_FLAG_RW;
+	buffer_create(&iface->feature_report.data);
+
+	gatt_descriptor_create(&iface->input_report_reference, UUID_REPORT_REFERENCE, &iface->input_report);
+	iface->input_report_reference.flags = GATT_FLAG_READ;
+	iface->input_report_reference.data.data = &iface->input_report_reference_data;
+	iface->input_report_reference.data.size = sizeof(iface->input_report_reference_data);
+
+	gatt_descriptor_create(&iface->output_report_reference, UUID_REPORT_REFERENCE, &iface->output_report);
+	iface->output_report_reference.flags = GATT_FLAG_READ;
+	iface->output_report_reference.data.data = &iface->output_report_reference_data;
+	iface->output_report_reference.data.size = sizeof(iface->output_report_reference_data);
+
+	gatt_descriptor_create(&iface->feature_report_reference, UUID_REPORT_REFERENCE, &iface->feature_report);
+	iface->feature_report_reference.flags = GATT_FLAG_READ;
+	iface->feature_report_reference.data.data = &iface->feature_report_reference_data;
+	iface->feature_report_reference.data.size = sizeof(iface->feature_report_reference_data);
+}
+
+void hogp_create(struct HOGPDevice* hog, const char* namespace, size_t nInterfaces) {
+	char path[PATH_MAX];
+	size_t i;
 	hog->pnp_data.source = 2;
-	hog->hid_info_data.bcdHID = htobs(0x111);
-	hog->hid_info_data.bCountryCode = 0;
-	hog->hid_info_data.flags = 0;
 
-	hog->input_report_reference_data.reportId = 0;
-	hog->input_report_reference_data.reportType = REPORT_TYPE_INPUT;
-
-	hog->output_report_reference_data.reportId = 0;
-	hog->output_report_reference_data.reportType = REPORT_TYPE_OUTPUT;
-
-	hog->feature_report_reference_data.reportId = 0;
-	hog->feature_report_reference_data.reportType = REPORT_TYPE_FEATURE;
-
-	gatt_service_create(&hog->devinfo, UUID_DEV_INFO, "/com/valvesoftware/Deck/service0");
+	snprintf(path, sizeof(path), "%s/service0000", namespace);
+	gatt_service_create(&hog->devinfo, UUID_DEV_INFO, path);
 	gatt_characteristic_create(&hog->pnp, UUID_PNP_ID, &hog->devinfo);
 	hog->pnp.flags = GATT_FLAG_READ;
 	hog->pnp.data.data = &hog->pnp_data;
 	hog->pnp.data.size = sizeof(hog->pnp_data);
 
-	gatt_service_create(&hog->hid, UUID_HID, "/com/valvesoftware/Deck/service1");
-	gatt_characteristic_create(&hog->hid_info, UUID_HID_INFO, &hog->hid);
-	hog->hid_info.flags = GATT_FLAG_READ;
-	hog->hid_info.data.data = &hog->hid_info_data;
-	hog->hid_info.data.size = sizeof(hog->hid_info_data);
-
-	gatt_characteristic_create(&hog->report_map, UUID_REPORT_MAP, &hog->hid);
-	hog->report_map.flags = GATT_FLAG_READ;
-	buffer_create(&hog->report_map.data);
-
-	gatt_characteristic_create(&hog->hid_control, UUID_HID_CONTROL, &hog->hid);
-	hog->hid_control.flags = GATT_FLAG_WRITE_NO_RESPONSE;
-	buffer_create(&hog->hid_control.data);
-
-	gatt_characteristic_create(&hog->input_report, UUID_REPORT, &hog->hid);
-	hog->input_report.flags = GATT_FLAG_RW | GATT_FLAG_NOTIFY;
-	buffer_create(&hog->input_report.data);
-
-	gatt_characteristic_create(&hog->output_report, UUID_REPORT, &hog->hid);
-	hog->output_report.flags = GATT_FLAG_RW | GATT_FLAG_WRITE_NO_RESPONSE;
-	buffer_create(&hog->output_report.data);
-
-	gatt_characteristic_create(&hog->feature_report, UUID_REPORT, &hog->hid);
-	hog->feature_report.flags = GATT_FLAG_RW;
-	buffer_create(&hog->feature_report.data);
-
-	gatt_descriptor_create(&hog->input_report_reference, UUID_REPORT_REFERENCE, &hog->input_report);
-	hog->input_report_reference.flags = GATT_FLAG_READ;
-	hog->input_report_reference.data.data = &hog->input_report_reference_data;
-	hog->input_report_reference.data.size = sizeof(hog->input_report_reference_data);
-
-	gatt_descriptor_create(&hog->output_report_reference, UUID_REPORT_REFERENCE, &hog->output_report);
-	hog->output_report_reference.flags = GATT_FLAG_READ;
-	hog->output_report_reference.data.data = &hog->output_report_reference_data;
-	hog->output_report_reference.data.size = sizeof(hog->output_report_reference_data);
-
-	gatt_descriptor_create(&hog->feature_report_reference, UUID_REPORT_REFERENCE, &hog->feature_report);
-	hog->feature_report_reference.flags = GATT_FLAG_READ;
-	hog->feature_report_reference.data.data = &hog->feature_report_reference_data;
-	hog->feature_report_reference.data.size = sizeof(hog->feature_report_reference_data);
-
-	gatt_service_create(&hog->battery, UUID_BATTERY, "/com/valvesoftware/Deck/service2");
-	gatt_characteristic_create(&hog->battery_level, UUID_PNP_ID, &hog->battery);
+	snprintf(path, sizeof(path), "%s/service0001", namespace);
+	gatt_service_create(&hog->battery, UUID_BATTERY, path);
+	gatt_characteristic_create(&hog->battery_level, UUID_BATTERY_LEVEL, &hog->battery);
 	hog->battery_level.flags = GATT_FLAG_READ;
 	hog->battery_level.data.data = "100%";
 	hog->battery_level.data.size = 4;
+
+	hog->nInterfaces = nInterfaces;
+	for (i = 0; i < nInterfaces; ++i) {
+		snprintf(path, sizeof(path), "%s/service%04zx", namespace, i + 2);
+		gatt_service_create(&hog->interface[i].hid, UUID_HID, path);
+		hogp_create_interface(&hog->interface[i]);
+	}
+}
+
+void hogp_destroy_interface(struct HOGPInterface* iface) {
+	gatt_service_destroy(&iface->hid);
+	buffer_destroy(&iface->input_report.data);
+	buffer_destroy(&iface->output_report.data);
+	buffer_destroy(&iface->feature_report.data);
 }
 
 void hogp_destroy(struct HOGPDevice* hog) {
+	size_t i;
 	gatt_service_destroy(&hog->devinfo);
-	gatt_service_destroy(&hog->hid);
 	gatt_service_destroy(&hog->battery);
-	buffer_destroy(&hog->input_report.data);
-	buffer_destroy(&hog->output_report.data);
-	buffer_destroy(&hog->feature_report.data);
+
+	for (i = 0; i < hog->nInterfaces; ++i) {
+		hogp_destroy_interface(&hog->interface[i]);
+	}
 }
 
 static int hogp_register(struct HOGPDevice* hog, sd_bus* bus) {
+	size_t i;
 	int res;
 
 	res = gatt_service_register(&hog->devinfo, bus);
@@ -256,16 +285,18 @@ static int hogp_register(struct HOGPDevice* hog, sd_bus* bus) {
 		return res;
 	}
 
-	res = gatt_service_register(&hog->hid, bus);
-	if (res < 0) {
-		printf("Failed to publish HID service: %s\n", strerror(-res));
-		return res;
-	}
-
 	res = gatt_service_register(&hog->battery, bus);
 	if (res < 0) {
 		printf("Failed to publish battery service: %s\n", strerror(-res));
 		return res;
+	}
+
+	for (i = 0; i < hog->nInterfaces; ++i) {
+		res = gatt_service_register(&hog->interface[i].hid, bus);
+		if (res < 0) {
+			printf("Failed to publish HID service: %s\n", strerror(-res));
+			return res;
+		}
 	}
 	return 0;
 }
@@ -276,6 +307,7 @@ bool hogp_setup(struct HOGPDevice* hog, const char* syspath) {
 	char interface[PATH_MAX];
 	char report_descriptor[DESCRIPTOR_SIZE_MAX];
 	ssize_t desc_size;
+	size_t i;
 
 	fd = vopen("%s/idVendor", O_RDONLY, 0666, syspath);
 	if (fd < 0) {
@@ -299,20 +331,22 @@ bool hogp_setup(struct HOGPDevice* hog, const char* syspath) {
 	hog->pnp_data.pid = u16;
 	close(fd);
 
-	if (!find_function(syspath, interface, sizeof(interface))) {
-		puts("Failed to find function");
-		return false;
-	}
-	fd = vopen("%s/report_descriptor", O_RDONLY, 0666, interface);
+	for (i = 0; i < hog->nInterfaces; ++i) {
+		if (!find_function(syspath, interface, sizeof(interface))) {
+			puts("Failed to find function");
+			return false;
+		}
+		fd = vopen("%s/report_descriptor", O_RDONLY, 0666, interface);
 
-	desc_size = read(fd, report_descriptor, sizeof(report_descriptor));
-	if (desc_size <= 0) {
-		perror("Failed to read report descriptor file");
-		return false;
-	}
+		desc_size = read(fd, report_descriptor, sizeof(report_descriptor));
+		if (desc_size <= 0) {
+			perror("Failed to read report descriptor file");
+			return false;
+		}
 
-	buffer_realloc(&hog->report_map.data, desc_size);
-	memcpy(hog->report_map.data.data, report_descriptor, desc_size);
+		buffer_realloc(&hog->interface[i].report_map.data, desc_size);
+		memcpy(&hog->interface[i].report_map.data.data, report_descriptor, desc_size);
+	}
 
 	return true;
 }
@@ -323,6 +357,7 @@ int main(int argc, char* argv[]) {
 	char gatt_manager[PATH_MAX];
 	const char* name;
 	struct sigaction sa;
+	int max_interfaces;
 	int ok = 1;
 	int intr = -1;
 	int ctrl = -1;
@@ -359,6 +394,15 @@ int main(int argc, char* argv[]) {
 		return 1;
 	}
 
+	max_interfaces = interface_count(syspath);
+	if (max_interfaces < 0) {
+		return 1;
+	}
+
+	if (max_interfaces > INTERFACES_MAX) {
+		max_interfaces = INTERFACES_MAX;
+	}
+
 	/* Set up D-Bus/BlueZ */
 	hci = hci_get_route(NULL); /* TODO: Allow passing HCI address? */
 	if (hci < 0) {
@@ -382,7 +426,7 @@ int main(int argc, char* argv[]) {
 	}
 
 	/* Create HoG device */
-	hogp_create(&hog);
+	hogp_create(&hog, "/com/valvesoftware/Deck", max_interfaces);
 
 	if (!hogp_setup(&hog, syspath)) {
 		goto shutdown;
