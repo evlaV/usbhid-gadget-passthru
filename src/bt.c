@@ -43,6 +43,8 @@
 #define REPORT_TYPE_OUTPUT 2
 #define REPORT_TYPE_FEATURE 3
 
+#define DESCRIPTOR_SIZE_MAX 4096
+
 bool did_hup = false;
 bool did_error = false;
 
@@ -268,17 +270,62 @@ static int hogp_register(struct HOGPDevice* hog, sd_bus* bus) {
 	return 0;
 }
 
+bool hogp_setup(struct HOGPDevice* hog, const char* syspath) {
+	int fd;
+	uint16_t u16;
+	char interface[PATH_MAX];
+	char report_descriptor[DESCRIPTOR_SIZE_MAX];
+	ssize_t desc_size;
+
+	fd = vopen("%s/idVendor", O_RDONLY, 0666, syspath);
+	if (fd < 0) {
+		return false;
+	}
+	if (!read_u16(fd, &u16)) {
+		close(fd);
+		return false;
+	}
+	hog->pnp_data.vid = u16;
+	close(fd);
+
+	fd = vopen("%s/idProduct", O_RDONLY, 0666, syspath);
+	if (fd < 0) {
+		return false;
+	}
+	if (!read_u16(fd, &u16)) {
+		close(fd);
+		return false;
+	}
+	hog->pnp_data.pid = u16;
+	close(fd);
+
+	if (!find_function(syspath, interface, sizeof(interface))) {
+		puts("Failed to find function");
+		return false;
+	}
+	fd = vopen("%s/report_descriptor", O_RDONLY, 0666, interface);
+
+	desc_size = read(fd, report_descriptor, sizeof(report_descriptor));
+	if (desc_size <= 0) {
+		perror("Failed to read report descriptor file");
+		return false;
+	}
+
+	buffer_realloc(&hog->report_map.data, desc_size);
+	memcpy(hog->report_map.data.data, report_descriptor, desc_size);
+
+	return true;
+}
+
 int main(int argc, char* argv[]) {
 	char syspath[PATH_MAX];
 	char bus_id[32];
 	char gatt_manager[PATH_MAX];
-	uint16_t u16;
 	const char* name;
 	struct sigaction sa;
 	int ok = 1;
 	int intr = -1;
 	int ctrl = -1;
-	int fd = -1;
 	int hci;
 	sd_bus* bus;
 	sd_bus_slot* object_manager_slot = NULL;
@@ -337,28 +384,9 @@ int main(int argc, char* argv[]) {
 	/* Create HoG device */
 	hogp_create(&hog);
 
-	fd = vopen("%s/idVendor", O_RDONLY, 0666, syspath);
-	if (fd < 0) {
+	if (!hogp_setup(&hog, syspath)) {
 		goto shutdown;
 	}
-	if (!read_u16(fd, &u16)) {
-		close(fd);
-		goto shutdown;
-	}
-	hog.pnp_data.vid = u16;
-	close(fd);
-
-	fd = vopen("%s/idProduct", O_RDONLY, 0666, syspath);
-	if (fd < 0) {
-		goto shutdown;
-	}
-	if (!read_u16(fd, &u16)) {
-		close(fd);
-		goto shutdown;
-	}
-	hog.pnp_data.pid = u16;
-	close(fd);
-	/* TODO: Connect USB device to HoG characteristics */
 
 	res = hogp_register(&hog, bus);
 	if (res < 0) {
