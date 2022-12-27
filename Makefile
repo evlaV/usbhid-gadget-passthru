@@ -24,7 +24,7 @@ OBJS=\
 .PHONY: clean install
 
 clean:
-	rm -f usbhid-gadget-passthru $(OBJS) src/bt.o src/dbus.o src/gatt.o
+	rm -f usbhid-gadget-passthru usbhid-bt-passthru $(OBJS) src/bt.o src/dbus.o src/gatt.o
 
 install: all
 	install -Ds -m755 -t "$(DESTDIR)/usr/bin" usbhid-gadget-passthru
