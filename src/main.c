@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: BSD-3-Clause */
 #include "dev.h"
 #include "options.h"
+#include "usb.h"
 #include "util.h"
 
 #include <ctype.h>
@@ -378,14 +379,12 @@ int main(int argc, char* argv[]) {
 	char configfs[PATH_MAX];
 	char udc[PATH_MAX];
 	char bus_id[32];
-	char tmp[16];
-	int fd;
 	int hidg[INTERFACES_MAX];
 	int hidraw[INTERFACES_MAX];
 	bool is_hid[INTERFACES_MAX];
 	int ret;
-	unsigned max_interfaces = 0;
-	unsigned i, j;
+	int max_interfaces = 0;
+	int i, j;
 	struct sigaction sa;
 	struct Options opts = {0};
 	int ok = 1;
@@ -400,29 +399,15 @@ int main(int argc, char* argv[]) {
 		return 0;
 	}
 
-	/* Resolve paths to sysfs nodes */
-	if (strchr(opts.dev, ':') && strlen(opts.dev) == 9) {
-		find_dev_by_id(opts.dev, syspath_tmp);
-	} else {
-		snprintf(syspath_tmp, sizeof(syspath_tmp), "/sys/bus/usb/devices/%s", opts.dev);
-	}
-	if (realpath(syspath_tmp, syspath) == NULL) {
-		perror("Failed to resolve sysfs path");
+	if (!find_sysfs_path(opts.dev, syspath, bus_id)) {
 		goto shutdown;
 	}
-	strncpy(bus_id, strrchr(syspath_tmp, '/') + 1, sizeof(bus_id) - 1);
 
-	/* Create node using configfs */
-	fd = vopen("%s/bNumInterfaces", O_RDONLY, 0666, syspath);
-	if (fd < 0) {
-		perror("Failed to open interface count");
+	max_interfaces = interface_count(syspath);
+	if (max_interfaces < 0) {
 		goto shutdown;
 	}
-	if (read(fd, tmp, sizeof(tmp)) < 0) {
-		perror("Failed to read interface count");
-		goto shutdown;
-	}
-	max_interfaces = strtoul(tmp, NULL, 10);
+
 	if (max_interfaces > INTERFACES_MAX) {
 		max_interfaces = INTERFACES_MAX;
 	}
@@ -440,23 +425,13 @@ int main(int argc, char* argv[]) {
 	}
 
 	for (i = 0; i < max_interfaces; ++i) {
-		snprintf(syspath_tmp, sizeof(syspath_tmp), "%s/%s:1.%u", syspath, bus_id, i);
-		fd = vopen("%s/bInterfaceClass", O_RDONLY, 0666, syspath_tmp);
-		if (fd < 0) {
-			perror("Could not determine interface class");
-			goto shutdown;
-		}
-		if (read(fd, tmp, 3) != 3) {
-			perror("Could not determine interface class");
-			close(fd);
-			goto shutdown;
-		}
-		close(fd);
-		is_hid[i] = memcmp(tmp, "03\n", 3) == 0;
+		int type = interface_type(syspath, bus_id, i);
+		is_hid[i] = type == 3;
 		if (!is_hid[i]) {
 			continue;
 		}
 
+		snprintf(syspath_tmp, sizeof(syspath_tmp), "%s/%s:1.%u", syspath, bus_id, i);
 		if (!create_configfs_function(configfs, syspath_tmp, i)) {
 			perror("Could not create function");
 			goto shutdown;
