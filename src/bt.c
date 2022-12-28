@@ -12,6 +12,7 @@
 #include <ctype.h>
 #include <dirent.h>
 #include <errno.h>
+#include <limits.h>
 #include <poll.h>
 #include <signal.h>
 #include <stdio.h>
@@ -19,9 +20,6 @@
 #include <string.h>
 #include <sys/fcntl.h>
 #include <unistd.h>
-
-#define HIDP_CONTROL_PSM 0x11
-#define HIDP_INTERRUPT_PSM 0x13
 
 #define UUID_DEV_INFO "0000180a-0000-1000-8000-00805f9b34fb"
 #define UUID_BATTERY "0000180f-0000-1000-8000-00805f9b34fb"
@@ -152,30 +150,6 @@ static const sd_bus_vtable le_advertisement[] = {
 	SD_BUS_PROPERTY("Timeout", "q", read_uint16, offsetof(struct LEAdvertisement, timeout), SD_BUS_VTABLE_PROPERTY_CONST),
 	SD_BUS_VTABLE_END
 };
-
-static int create_server(uint16_t psm) {
-	struct sockaddr_l2 addr = {
-		.l2_family = AF_BLUETOOTH,
-		.l2_psm = htobs(psm),
-		.l2_bdaddr = *BDADDR_ANY,
-	};
-	int res;
-	int sock = socket(AF_BLUETOOTH, SOCK_SEQPACKET, BTPROTO_L2CAP);
-	if (sock < 0) {
-		return sock;
-	}
-	res = bind(sock, (const struct sockaddr*) &addr, sizeof(addr));
-	if (res < 0) {
-		close(sock);
-		return res;
-	}
-	res = listen(sock, 1);
-	if (res < 0) {
-		close(sock);
-		return res;
-	}
-	return sock;
-}
 
 void hogp_create_interface(struct HOGPInterface* iface) {
 	iface->hid_info_data.bcdHID = htobs(0x111);
@@ -371,8 +345,6 @@ int main(int argc, char* argv[]) {
 	struct sigaction sa;
 	int max_interfaces;
 	int ok = 1;
-	int intr = -1;
-	int ctrl = -1;
 	int hci;
 	sd_bus* bus;
 	sd_bus_slot* object_manager_slot = NULL;
@@ -489,18 +461,6 @@ int main(int argc, char* argv[]) {
 		goto shutdown;
 	}
 
-	ctrl = create_server(HIDP_CONTROL_PSM);
-	if (ctrl < 0) {
-		perror("Failed to create control socket");
-		goto shutdown;
-	}
-
-	intr = create_server(HIDP_INTERRUPT_PSM);
-	if (intr < 0) {
-		perror("Failed to create interrupt socket");
-		goto shutdown;
-	}
-
 	/* We want to exit cleanly in event of SIGINT or SIGHUP */
 	sigemptyset(&sa.sa_mask);
 	sa.sa_handler = hup;
@@ -532,26 +492,11 @@ int main(int argc, char* argv[]) {
 			continue;
 		}
 
-		while (!did_hup) {
-			nfds_t nfds = 2;
-			struct pollfd fds[2] = {
-				{.fd = intr, .events = POLLIN},
-				{.fd = ctrl, .events = POLLIN},
-			};
-			res = poll(fds, nfds, 2);
-			if (res > 0) {
-				puts("Event!");
-			}
-			res = sd_bus_wait(bus, 2);
-			if (res < 0 && res != -EINTR) {
-				printf("Failed to wait on bus: %s\n", strerror(-res));
-				did_hup = true;
-				did_error = true;
-				break;
-			}
-			if (res > 0) {
-				break;
-			}
+		res = sd_bus_wait(bus, UINT_MAX);
+		if (res < 0 && res != -EINTR) {
+			printf("Failed to wait on bus: %s\n", strerror(-res));
+			did_error = true;
+			break;
 		}
 	}
 
@@ -573,8 +518,6 @@ shutdown:
 	sd_bus_slot_unref(register_advert_slot);
 	sd_bus_slot_unref(advert_slot);
 	sd_bus_unref(bus);
-	close(ctrl);
-	close(intr);
 
 	return ok;
 }
