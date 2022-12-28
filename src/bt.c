@@ -81,6 +81,7 @@ struct ReportReference {
 };
 
 struct HOGPInterface {
+	int id;
 	struct GattService hid;
 
 	struct GattCharacteristic hid_info;
@@ -301,10 +302,11 @@ static int hogp_register(struct HOGPDevice* hog, sd_bus* bus) {
 	return 0;
 }
 
-bool hogp_setup(struct HOGPDevice* hog, const char* syspath) {
+bool hogp_setup(struct HOGPDevice* hog, const char* syspath, const char* bus_id) {
 	int fd;
 	uint16_t u16;
 	char interface[PATH_MAX];
+	char syspath_tmp[PATH_MAX];
 	char report_descriptor[DESCRIPTOR_SIZE_MAX];
 	ssize_t desc_size;
 	size_t i;
@@ -332,7 +334,14 @@ bool hogp_setup(struct HOGPDevice* hog, const char* syspath) {
 	close(fd);
 
 	for (i = 0; i < hog->nInterfaces; ++i) {
-		if (!find_function(syspath, interface, sizeof(interface))) {
+		int type = interface_type(syspath, bus_id, i);
+		if (type != 3) {
+			continue;
+		}
+
+		hog->interface[i].id = i;
+		snprintf(syspath_tmp, sizeof(syspath_tmp), "%s/%s:1.%lu", syspath, bus_id, i);
+		if (!find_function(syspath_tmp, interface, sizeof(interface))) {
 			puts("Failed to find function");
 			return false;
 		}
@@ -345,7 +354,7 @@ bool hogp_setup(struct HOGPDevice* hog, const char* syspath) {
 		}
 
 		buffer_realloc(&hog->interface[i].report_map.data, desc_size);
-		memcpy(&hog->interface[i].report_map.data.data, report_descriptor, desc_size);
+		memcpy(hog->interface[i].report_map.data.data, report_descriptor, desc_size);
 	}
 
 	return true;
@@ -355,6 +364,7 @@ int main(int argc, char* argv[]) {
 	char syspath[PATH_MAX];
 	char bus_id[32];
 	char gatt_manager[PATH_MAX];
+	bool is_hid[INTERFACES_MAX] = {0};
 	const char* name;
 	struct sigaction sa;
 	int max_interfaces;
@@ -371,6 +381,7 @@ int main(int argc, char* argv[]) {
 	sd_bus_message* reply = NULL;
 	sd_bus_error error;
 	int res;
+	int i;
 	struct HOGPDevice hog;
 	struct LEAdvertisement advertisement = {
 		.type = "peripheral",
@@ -403,6 +414,16 @@ int main(int argc, char* argv[]) {
 		max_interfaces = INTERFACES_MAX;
 	}
 
+	/* Get the number of HID interfaces */
+	for (i = 0; i < max_interfaces; ++i) {
+		int type = interface_type(syspath, bus_id, i);
+		is_hid[i] = type == 3;
+	}
+	max_interfaces = 0;
+	for (i = 0; i < INTERFACES_MAX; ++i) {
+		max_interfaces += is_hid[i];
+	}
+
 	/* Set up D-Bus/BlueZ */
 	hci = hci_get_route(NULL); /* TODO: Allow passing HCI address? */
 	if (hci < 0) {
@@ -428,7 +449,7 @@ int main(int argc, char* argv[]) {
 	/* Create HoG device */
 	hogp_create(&hog, "/com/valvesoftware/Deck", max_interfaces);
 
-	if (!hogp_setup(&hog, syspath)) {
+	if (!hogp_setup(&hog, syspath, bus_id)) {
 		goto shutdown;
 	}
 

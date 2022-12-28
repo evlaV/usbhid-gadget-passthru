@@ -47,7 +47,7 @@ struct GattService {
 	struct GattCharacteristic* characteristics[MAX_GATT_CHAR];
 	size_t nCharacteristics;
 
-	const char* path;
+	char* path;
 	sd_bus_slot* slot;
 };
 
