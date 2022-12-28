@@ -333,6 +333,12 @@ bool hogp_setup(struct HOGPDevice* hog, const char* syspath, const char* bus_id)
 		memcpy(hog->interface[i].report_map.data.data, report_descriptor, desc_size);
 	}
 
+	/* TODO: Hook up Input Report */
+	/* TODO: Hook up Output Report */
+	/* TODO: Hook up Feature Report */
+	/* TODO: Set up HID Control Point characteristic */
+	/* TODO: Figure out Report Map characteristic descriptors */
+
 	return true;
 }
 
@@ -474,19 +480,10 @@ int main(int argc, char* argv[]) {
 
 	ok = 0;
 	while (!did_hup) {
-		sd_bus_message* m;
-		res = sd_bus_process(bus, &m);
+		res = sd_bus_process(bus, NULL);
 		if (res < 0) {
 			printf("Failed to process bus: %s\n", strerror(-res));
 			break;
-		}
-		if (m) {
-			puts("");
-			printf("path: %s\n", sd_bus_message_get_path(m));
-			printf("iface: %s\n", sd_bus_message_get_interface(m));
-			printf("member: %s\n", sd_bus_message_get_member(m));
-			printf("sender: %s\n", sd_bus_message_get_sender(m));
-			sd_bus_message_unref(m);
 		}
 		if (res > 0) {
 			continue;
