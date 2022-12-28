@@ -264,6 +264,8 @@ void hogp_destroy_interface(struct HOGPInterface* iface) {
 	buffer_destroy(&iface->input_report.data);
 	buffer_destroy(&iface->output_report.data);
 	buffer_destroy(&iface->feature_report.data);
+	buffer_destroy(&iface->report_map.data);
+	buffer_destroy(&iface->hid_control.data);
 }
 
 void hogp_destroy(struct HOGPDevice* hog) {
@@ -560,8 +562,10 @@ int main(int argc, char* argv[]) {
 shutdown:
 	sd_bus_call_method(bus, "org.bluez", gatt_manager, "org.bluez.GattManager1", "UnregisterApplication",
 		&error, &reply, "o", "/com/valvesoftware/Deck");
+	sd_bus_message_unref(reply);
 	sd_bus_call_method(bus, "org.bluez", gatt_manager, "org.bluez.LEAdvertisingManager1", "UnregisterAdvertisement",
 		&error, &reply, "o", "/com/valvesoftware/Deck");
+	sd_bus_message_unref(reply);
 	sd_bus_slot_unref(object_manager_slot);
 	sd_bus_slot_unref(register_service_slot);
 	hogp_destroy(&hog);
