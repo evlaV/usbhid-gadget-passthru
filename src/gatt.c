@@ -43,6 +43,7 @@ static const sd_bus_vtable gatt_descriptor[] = {
 static int parse_flags(sd_bus_message* m, size_t* offset, size_t* length, const char* objtype, sd_bus_error* error) {
 	const char* opt;
 	int res;
+	uint16_t mtu = *length;
 
 	res = sd_bus_message_enter_container(m, 'a', "{sv}");
 	if (res < 0) {
@@ -61,11 +62,14 @@ static int parse_flags(sd_bus_message* m, size_t* offset, size_t* length, const 
 		}
 		if (strcasecmp(opt, "offset") == 0) {
 			uint16_t read_offset;
-			if (type != 'q') {
+
+			if (type == 'q') {
+				res = sd_bus_message_read(m, "q", &read_offset);
+			} else if (type == 'v') {
+				res = sd_bus_message_read(m, "v", "q", &read_offset);
+			} else {
 				return -EINVAL;
 			}
-
-			res = sd_bus_message_read(m, "q", &read_offset);
 			if (res < 0) {
 				return res;
 			}
@@ -75,6 +79,17 @@ static int parse_flags(sd_bus_message* m, size_t* offset, size_t* length, const 
 			}
 			*offset = read_offset;
 			*length -= read_offset;
+		} else if (strcasecmp(opt, "mtu") == 0) {
+			if (type == 'q') {
+				res = sd_bus_message_read(m, "q", &mtu);
+			} else if (type == 'v') {
+				res = sd_bus_message_read(m, "v", "q", &mtu);
+			} else {
+				return -EINVAL;
+			}
+			if (res < 0) {
+				return res;
+			}
 		} else {
 			printf("Unhandled flag: %s : %c\n", opt, type);
 			sd_bus_message_skip(m, NULL);
@@ -92,6 +107,10 @@ static int parse_flags(sd_bus_message* m, size_t* offset, size_t* length, const 
 	res = sd_bus_message_exit_container(m);
 	if (res < 0) {
 		return res;
+	}
+
+	if (mtu < *length) {
+		*length = mtu;
 	}
 	return 0;
 }
