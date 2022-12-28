@@ -219,7 +219,7 @@ void gatt_service_create(struct GattService* service, const char* uuid, const ch
 	memset(service, 0, sizeof(*service));
 	strncpy(service->uuid, uuid, sizeof(service->uuid) - 1);
 	service->primary = true;
-	service->path = path;
+	service->path = strdup(path);
 }
 
 void gatt_service_destroy(struct GattService* service) {
@@ -232,6 +232,7 @@ void gatt_service_destroy(struct GattService* service) {
 		}
 	}
 	sd_bus_slot_unref(service->slot);
+	free(service->path);
 }
 
 int gatt_service_register(struct GattService* service, sd_bus* bus) {
