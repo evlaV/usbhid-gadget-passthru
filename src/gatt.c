@@ -6,6 +6,14 @@
 #include <errno.h>
 #include <stddef.h>
 #include <stdlib.h>
+#include <sys/socket.h>
+#include <unistd.h>
+
+struct Flags {
+	size_t offset;
+	uint16_t mtu;
+	bool reply;
+};
 
 static int read_characteristic(sd_bus_message* m, void *userdata, sd_bus_error* error);
 static int write_characteristic(sd_bus_message* m, void *userdata, sd_bus_error* error);
@@ -32,7 +40,7 @@ static const sd_bus_vtable gatt_characteristic[] = {
 	SD_BUS_PROPERTY("NotifyAcquired", "b", read_bool, offsetof(struct GattCharacteristic, notify_acquired), 0),
 	SD_BUS_METHOD_WITH_ARGS("ReadValue", "a{sv}", "ay", read_characteristic, 0),
 	SD_BUS_METHOD_WITH_ARGS("WriteValue", "aya{sv}", "ay", write_characteristic, 0),
-	SD_BUS_METHOD_WITH_ARGS("AcquireNotify", "a{sv}", "hy", acquire_notify, 0),
+	SD_BUS_METHOD_WITH_ARGS("AcquireNotify", "a{sv}", "hq", acquire_notify, 0),
 	SD_BUS_VTABLE_END
 };
 
@@ -45,10 +53,9 @@ static const sd_bus_vtable gatt_descriptor[] = {
 	SD_BUS_VTABLE_END
 };
 
-static int parse_flags(sd_bus_message* m, size_t* offset, size_t* length, const char* objtype, sd_bus_error* error) {
+static int parse_flags(sd_bus_message* m, struct Flags* flags, sd_bus_error*) {
 	const char* opt;
 	int res;
-	uint16_t mtu = *length;
 
 	res = sd_bus_message_enter_container(m, 'a', "{sv}");
 	if (res < 0) {
@@ -66,34 +73,43 @@ static int parse_flags(sd_bus_message* m, size_t* offset, size_t* length, const 
 			return res;
 		}
 		if (strcasecmp(opt, "offset") == 0) {
-			uint16_t read_offset;
-
 			if (type == 'q') {
-				res = sd_bus_message_read(m, "q", &read_offset);
+				res = sd_bus_message_read(m, "q", &flags->offset);
 			} else if (type == 'v') {
-				res = sd_bus_message_read(m, "v", "q", &read_offset);
+				res = sd_bus_message_read(m, "v", "q", &flags->offset);
 			} else {
 				return -EINVAL;
 			}
 			if (res < 0) {
 				return res;
 			}
-
-			if (read_offset > *length) {
-				return sd_bus_error_setf(error, "org.bluez.Error.InvalidOffset", "Requested offset %u exceeds %s size %zu", read_offset, objtype, *length);
-			}
-			*offset = read_offset;
-			*length -= read_offset;
 		} else if (strcasecmp(opt, "mtu") == 0) {
 			if (type == 'q') {
-				res = sd_bus_message_read(m, "q", &mtu);
+				res = sd_bus_message_read(m, "q", &flags->mtu);
 			} else if (type == 'v') {
-				res = sd_bus_message_read(m, "v", "q", &mtu);
+				res = sd_bus_message_read(m, "v", "q", &flags->mtu);
 			} else {
 				return -EINVAL;
 			}
 			if (res < 0) {
 				return res;
+			}
+		} else if (strcasecmp(opt, "type") == 0) {
+			const char* typename;
+			if (type == 's') {
+				res = sd_bus_message_read(m, "s", &typename);
+			} else if (type == 's') {
+				res = sd_bus_message_read(m, "v", "s", &typename);
+			} else {
+				return -EINVAL;
+			}
+			if (res < 0) {
+				return res;
+			}
+			if (strcasecmp(typename, "command") == 0) {
+				flags->reply = false;
+			} else if (strcasecmp(typename, "request") == 0) {
+				flags->reply = true;
 			}
 		} else {
 			printf("Unhandled flag: %s : %c\n", opt, type);
@@ -113,17 +129,13 @@ static int parse_flags(sd_bus_message* m, size_t* offset, size_t* length, const 
 	if (res < 0) {
 		return res;
 	}
-
-	if (mtu < *length) {
-		*length = mtu;
-	}
 	return 0;
 }
 
 static int read_characteristic(sd_bus_message* m, void *userdata, sd_bus_error* error) {
 	struct GattCharacteristic* characteristic = userdata;
 	int res;
-	size_t offset = 0;
+	struct Flags flags = {.mtu = 517};
 	size_t length = characteristic->data.size;
 	sd_bus_message* reply;
 
@@ -131,9 +143,18 @@ static int read_characteristic(sd_bus_message* m, void *userdata, sd_bus_error* 
 		return sd_bus_error_set(error, "org.bluez.Error.NotSupported", "Reading not supported");
 	}
 
-	res = parse_flags(m, &offset, &length, "characteristic", error);
+	res = parse_flags(m, &flags, error);
 	if (res < 0 || sd_bus_error_is_set(error)) {
 		return res;
+	}
+
+	if (flags.offset > length) {
+		return sd_bus_error_setf(error, "org.bluez.Error.InvalidOffset",
+			"Requested offset %lu exceeds characteristic size %zu", flags.offset, length);
+	}
+	length -= flags.offset;
+	if (flags.mtu && length > flags.mtu) {
+		length = flags.mtu;
 	}
 
 	res = sd_bus_message_new_method_return(m, &reply);
@@ -141,7 +162,7 @@ static int read_characteristic(sd_bus_message* m, void *userdata, sd_bus_error* 
 		return res;
 	}
 
-	res = sd_bus_message_append_array(reply, 'y', &((uint8_t*) characteristic->data.data)[offset], length);
+	res = sd_bus_message_append_array(reply, 'y', &((uint8_t*) characteristic->data.data)[flags.offset], length);
 	if (res < 0) {
 		return res;
 	}
@@ -152,23 +173,37 @@ static int read_characteristic(sd_bus_message* m, void *userdata, sd_bus_error* 
 static int write_characteristic(sd_bus_message* m, void *userdata, sd_bus_error* error) {
 	struct GattCharacteristic* characteristic = userdata;
 	int res;
-	size_t offset = 0;
-	size_t length = characteristic->data.size;
+	struct Flags flags = {.reply = true};
+	size_t size;
+	const void* data;
 
 	if (!(characteristic->flags & GATT_FLAG_WRITE)) {
 		return sd_bus_error_set(error, "org.bluez.Error.NotSupported", "Writing not supported");
 	}
 
-	res = parse_flags(m, &offset, &length, "characteristic", error);
+	res = parse_flags(m, &flags, error);
 	if (res < 0 || sd_bus_error_is_set(error)) {
 		return res;
 	}
 
-	return -1;
+	if (!flags.reply && !(characteristic->flags & GATT_FLAG_WRITE_NO_RESPONSE)) {
+		return sd_bus_error_set(error, "org.bluez.Error.NotSupported", "Writing without response not supported");
+	}
+
+	res = sd_bus_message_read_array(m, 'y', &data, &size);
+	if (res < 0) {
+		return res;
+	}
+
+	return characteristic->write(data, size, flags.offset, characteristic->userdata);
 }
 
-static int acquire_notify(sd_bus_message*, void *userdata, sd_bus_error* error) {
+static int acquire_notify(sd_bus_message* m, void *userdata, sd_bus_error* error) {
 	struct GattCharacteristic* characteristic = userdata;
+	int res;
+	struct Flags flags = {.mtu = 517};
+	int fds[2];
+	sd_bus_message* reply;
 
 	if (!(characteristic->flags & GATT_FLAG_READ)) {
 		return sd_bus_error_set(error, "org.bluez.Error.NotSupported", "Reading not supported");
@@ -178,13 +213,40 @@ static int acquire_notify(sd_bus_message*, void *userdata, sd_bus_error* error) 
 		return sd_bus_error_set(error, "org.bluez.Error.Failed", "Notify already acquired");
 	}
 
-	return -1;
+	res = parse_flags(m, &flags, error);
+	if (res < 0 || sd_bus_error_is_set(error)) {
+		return res;
+	}
+
+	res = socketpair(AF_LOCAL, SOCK_SEQPACKET | SOCK_NONBLOCK, 0, fds);
+	if (res < 0) {
+		return res;
+	}
+
+	characteristic->notify_fd = fds[1];
+	characteristic->notify_acquired = true;
+
+	res = sd_bus_message_new_method_return(m, &reply);
+	if (res < 0) {
+		return res;
+	}
+
+	res = sd_bus_message_append_basic(reply, 'h', &fds[0]);
+	if (res < 0) {
+		return res;
+	}
+
+	res = sd_bus_message_append_basic(reply, 'q', &flags.mtu);
+	if (res < 0) {
+		return res;
+	}
+	return sd_bus_message_send(reply);
 }
 
 static int read_descriptor(sd_bus_message* m, void *userdata, sd_bus_error* error) {
 	struct GattDescriptor* descriptor = userdata;
 	int res;
-	size_t offset = 0;
+	struct Flags flags = {.mtu = 517};
 	size_t length = descriptor->data.size;
 	sd_bus_message* reply;
 
@@ -192,9 +254,18 @@ static int read_descriptor(sd_bus_message* m, void *userdata, sd_bus_error* erro
 		return sd_bus_error_set(error, "org.bluez.Error.NotSupported", "Reading not supported");
 	}
 
-	res = parse_flags(m, &offset, &length, "descriptor", error);
+	res = parse_flags(m, &flags, error);
 	if (res < 0 || sd_bus_error_is_set(error)) {
 		return res;
+	}
+
+	if (flags.offset > length) {
+		return sd_bus_error_setf(error, "org.bluez.Error.InvalidOffset",
+			"Requested offset %lu exceeds descriptor size %zu", flags.offset, length);
+	}
+	length -= flags.offset;
+	if (flags.mtu && length > flags.mtu) {
+		length = flags.mtu;
 	}
 
 	res = sd_bus_message_new_method_return(m, &reply);
@@ -202,7 +273,7 @@ static int read_descriptor(sd_bus_message* m, void *userdata, sd_bus_error* erro
 		return res;
 	}
 
-	res = sd_bus_message_append_array(reply, 'y', &((uint8_t*) descriptor->data.data)[offset], length);
+	res = sd_bus_message_append_array(reply, 'y', &((uint8_t*) descriptor->data.data)[flags.offset], length);
 	if (res < 0) {
 		return res;
 	}
@@ -282,6 +353,9 @@ void gatt_service_destroy(struct GattService* service) {
 	size_t i, j;
 	for (i = 0; i < service->nCharacteristics; ++i) {
 		struct GattCharacteristic* characteristic = service->characteristics[i];
+		if (characteristic->notify_fd >= 0) {
+			close(characteristic->notify_fd);
+		}
 		sd_bus_slot_unref(characteristic->slot);
 		for (j = 0; j < characteristic->nDescriptors; ++j) {
 			sd_bus_slot_unref(characteristic->descriptors[j]->slot);
@@ -324,6 +398,7 @@ void gatt_characteristic_create(struct GattCharacteristic* characteristic, const
 	memset(characteristic, 0, sizeof(*characteristic));
 	strncpy(characteristic->uuid, uuid, sizeof(characteristic->uuid) - 1);
 	characteristic->service = parent;
+	characteristic->notify_fd = -1;
 
 	if (parent->nCharacteristics == MAX_GATT_CHAR) {
 		abort();
