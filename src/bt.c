@@ -99,6 +99,8 @@ struct HOGPInterface {
 	struct ReportReference input_report_reference_data;
 	struct ReportReference output_report_reference_data;
 	struct ReportReference feature_report_reference_data;
+
+	int fd;
 };
 
 struct HOGPDevice {
@@ -204,6 +206,9 @@ void hogp_create_interface(struct HOGPInterface* iface) {
 	iface->feature_report_reference.flags = GATT_FLAG_READ;
 	iface->feature_report_reference.data.data = &iface->feature_report_reference_data;
 	iface->feature_report_reference.data.size = sizeof(iface->feature_report_reference_data);
+
+	iface->id = 0;
+	iface->fd = -1;
 }
 
 void hogp_create(struct HOGPDevice* hog, const char* namespace, size_t nInterfaces) {
@@ -240,6 +245,7 @@ void hogp_destroy_interface(struct HOGPInterface* iface) {
 	buffer_destroy(&iface->feature_report.data);
 	buffer_destroy(&iface->report_map.data);
 	buffer_destroy(&iface->hid_control.data);
+	close(iface->fd);
 }
 
 void hogp_destroy(struct HOGPDevice* hog) {
@@ -331,6 +337,8 @@ bool hogp_setup(struct HOGPDevice* hog, const char* syspath, const char* bus_id)
 
 		buffer_realloc(&hog->interface[i].report_map.data, desc_size);
 		memcpy(hog->interface[i].report_map.data.data, report_descriptor, desc_size);
+
+		hog->interface[i].fd = find_hidraw(syspath_tmp);
 	}
 
 	/* TODO: Hook up Input Report */
@@ -339,6 +347,58 @@ bool hogp_setup(struct HOGPDevice* hog, const char* syspath, const char* bus_id)
 	/* TODO: Set up HID Control Point characteristic */
 	/* TODO: Figure out Report Map characteristic descriptors */
 
+	return true;
+}
+
+bool poll_fds(sd_bus* bus, struct HOGPDevice* dev) {
+	struct pollfd fds[INTERFACES_MAX];
+	size_t i;
+	int res;
+
+	for (i = 0; i < dev->nInterfaces; ++i) {
+		fds[i].fd = dev->interface[i].fd;
+		fds[i].events = POLLIN | POLLPRI;
+	}
+
+	while (!did_hup) {
+		res = sd_bus_process(bus, NULL);
+		if (res < 0) {
+			printf("Failed to process bus: %s\n", strerror(-res));
+			break;
+		}
+		if (res > 0) {
+			continue;
+		}
+
+		while (!did_hup && !did_error) {
+			res = sd_bus_wait(bus, 4);
+			if (res < 0 && res != -EINTR) {
+				printf("Failed to wait on bus: %s\n", strerror(-res));
+				return false;
+			}
+			if (res > 0) {
+				break;
+			}
+
+			res = poll(fds, dev->nInterfaces, 6);
+			if (res == -EAGAIN) {
+				continue;
+			}
+			if (res < 0) {
+				if (errno != EINTR) {
+					perror("Failed to poll nodes");
+				}
+				return did_hup;
+			}
+
+			for (i = 0; i < dev->nInterfaces; ++i) {
+				if (fds[i].revents & POLLIN) {
+				}
+				if (fds[i].revents & POLLPRI) {
+				}
+			}
+		}
+	}
 	return true;
 }
 
@@ -478,24 +538,7 @@ int main(int argc, char* argv[]) {
 		printf("name: %s\n", name);
 	}
 
-	ok = 0;
-	while (!did_hup) {
-		res = sd_bus_process(bus, NULL);
-		if (res < 0) {
-			printf("Failed to process bus: %s\n", strerror(-res));
-			break;
-		}
-		if (res > 0) {
-			continue;
-		}
-
-		res = sd_bus_wait(bus, UINT_MAX);
-		if (res < 0 && res != -EINTR) {
-			printf("Failed to wait on bus: %s\n", strerror(-res));
-			did_error = true;
-			break;
-		}
-	}
+	ok = !poll_fds(bus, &hog);
 
 	if (did_error) {
 		ok = 1;
