@@ -33,6 +33,7 @@ struct GattCharacteristic {
 	uint32_t flags;
 	uint16_t mtu;
 	struct Buffer data;
+	bool notify_acquired;
 
 	struct GattDescriptor* descriptors[MAX_GATT_DESC];
 	size_t nDescriptors;

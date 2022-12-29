@@ -8,6 +8,8 @@
 #include <stdlib.h>
 
 static int read_characteristic(sd_bus_message* m, void *userdata, sd_bus_error* error);
+static int write_characteristic(sd_bus_message* m, void *userdata, sd_bus_error* error);
+static int acquire_notify(sd_bus_message* m, void *userdata, sd_bus_error* error);
 static int read_descriptor(sd_bus_message* m, void *userdata, sd_bus_error* error);
 
 static int read_flags(sd_bus*, const char*, const char*, const char*, sd_bus_message* reply, void* userdata, sd_bus_error*);
@@ -27,7 +29,10 @@ static const sd_bus_vtable gatt_characteristic[] = {
 	SD_BUS_PROPERTY("Service", "o", read_service_path, 0, SD_BUS_VTABLE_PROPERTY_CONST),
 	SD_BUS_PROPERTY("Flags", "as", read_flags, offsetof(struct GattCharacteristic, flags), SD_BUS_VTABLE_PROPERTY_CONST),
 	SD_BUS_PROPERTY("MTU", "q", read_uint16, offsetof(struct GattCharacteristic, mtu), SD_BUS_VTABLE_PROPERTY_CONST),
+	SD_BUS_PROPERTY("NotifyAcquired", "b", read_bool, offsetof(struct GattCharacteristic, notify_acquired), 0),
 	SD_BUS_METHOD_WITH_ARGS("ReadValue", "a{sv}", "ay", read_characteristic, 0),
+	SD_BUS_METHOD_WITH_ARGS("WriteValue", "aya{sv}", "ay", write_characteristic, 0),
+	SD_BUS_METHOD_WITH_ARGS("AcquireNotify", "a{sv}", "hy", acquire_notify, 0),
 	SD_BUS_VTABLE_END
 };
 
@@ -142,6 +147,38 @@ static int read_characteristic(sd_bus_message* m, void *userdata, sd_bus_error* 
 	}
 
 	return sd_bus_message_send(reply);
+}
+
+static int write_characteristic(sd_bus_message* m, void *userdata, sd_bus_error* error) {
+	struct GattCharacteristic* characteristic = userdata;
+	int res;
+	size_t offset = 0;
+	size_t length = characteristic->data.size;
+
+	if (!(characteristic->flags & GATT_FLAG_WRITE)) {
+		return sd_bus_error_set(error, "org.bluez.Error.NotSupported", "Writing not supported");
+	}
+
+	res = parse_flags(m, &offset, &length, "characteristic", error);
+	if (res < 0 || sd_bus_error_is_set(error)) {
+		return res;
+	}
+
+	return -1;
+}
+
+static int acquire_notify(sd_bus_message*, void *userdata, sd_bus_error* error) {
+	struct GattCharacteristic* characteristic = userdata;
+
+	if (!(characteristic->flags & GATT_FLAG_READ)) {
+		return sd_bus_error_set(error, "org.bluez.Error.NotSupported", "Reading not supported");
+	}
+
+	if (characteristic->notify_acquired) {
+		return sd_bus_error_set(error, "org.bluez.Error.Failed", "Notify already acquired");
+	}
+
+	return -1;
 }
 
 static int read_descriptor(sd_bus_message* m, void *userdata, sd_bus_error* error) {
