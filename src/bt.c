@@ -157,6 +157,26 @@ static const sd_bus_vtable le_advertisement[] = {
 	SD_BUS_VTABLE_END
 };
 
+static int output_report(const void* data, size_t size, size_t offset, void* userdata) {
+	struct HOGPInterface* iface = userdata;
+	(void) iface;
+	(void) data;
+	(void) size;
+	(void) offset;
+
+	return 0;
+}
+
+static int feature_report(const void* data, size_t size, size_t offset, void* userdata) {
+	struct HOGPInterface* iface = userdata;
+	(void) iface;
+	(void) data;
+	(void) size;
+	(void) offset;
+
+	return 0;
+}
+
 void hogp_create_interface(struct HOGPInterface* iface) {
 	iface->hid_info_data.bcdHID = htobs(0x111);
 	iface->hid_info_data.bCountryCode = 0;
@@ -182,18 +202,25 @@ void hogp_create_interface(struct HOGPInterface* iface) {
 
 	gatt_characteristic_create(&iface->hid_control, UUID_HID_CONTROL, &iface->hid);
 	iface->hid_control.flags = GATT_FLAG_WRITE_NO_RESPONSE;
+	iface->hid_control.write = NULL;
 	buffer_create(&iface->hid_control.data);
 
 	gatt_characteristic_create(&iface->input_report, UUID_REPORT, &iface->hid);
 	iface->input_report.flags = GATT_FLAG_RW | GATT_FLAG_NOTIFY;
+	iface->input_report.write = output_report;
+	iface->input_report.userdata = iface;
 	buffer_create(&iface->input_report.data);
 
 	gatt_characteristic_create(&iface->output_report, UUID_REPORT, &iface->hid);
 	iface->output_report.flags = GATT_FLAG_RW | GATT_FLAG_WRITE_NO_RESPONSE;
+	iface->output_report.write = output_report;
+	iface->output_report.userdata = iface;
 	buffer_create(&iface->output_report.data);
 
 	gatt_characteristic_create(&iface->feature_report, UUID_REPORT, &iface->hid);
 	iface->feature_report.flags = GATT_FLAG_RW;
+	iface->feature_report.write = feature_report;
+	iface->feature_report.userdata = iface;
 	buffer_create(&iface->feature_report.data);
 
 	gatt_descriptor_create(&iface->input_report_reference, UUID_REPORT_REFERENCE, &iface->input_report);
