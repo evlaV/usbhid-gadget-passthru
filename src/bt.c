@@ -21,19 +21,20 @@
 #include <sys/fcntl.h>
 #include <unistd.h>
 
-#define UUID_DEV_INFO "0000180a-0000-1000-8000-00805f9b34fb"
-#define UUID_BATTERY "0000180f-0000-1000-8000-00805f9b34fb"
-#define UUID_HID "00001812-0000-1000-8000-00805f9b34fb"
+#define UUID16(U) "0000" #U "-0000-1000-8000-00805f9b34fb"
 
-#define UUID_REPORT_REFERENCE "00002908-0000-1000-8000-00805f9b34fb"
-#define UUID_BATTERY_LEVEL "00002a19-0000-1000-8000-00805f9b34fb"
+#define UUID_DEV_INFO  UUID16(180a)
+#define UUID_BATTERY   UUID16(180f)
+#define UUID_HID       UUID16(1812)
 
-#define UUID_HID_INFO "00002a4a-0000-1000-8000-00805f9b34fb"
-#define UUID_REPORT_MAP "00002a4b-0000-1000-8000-00805f9b34fb"
-#define UUID_HID_CONTROL "00002a4c-0000-1000-8000-00805f9b34fb"
-#define UUID_REPORT "00002a4d-0000-1000-8000-00805f9b34fb"
+#define UUID_REPORT_REFERENCE UUID16(2908)
 
-#define UUID_PNP_ID "00002a50-0000-1000-8000-00805f9b34fb"
+#define UUID_BATTERY_LEVEL      UUID16(2a19)
+#define UUID_HID_INFO           UUID16(2a4a)
+#define UUID_REPORT_MAP         UUID16(2a4b)
+#define UUID_HID_CONTROL        UUID16(2a4c)
+#define UUID_REPORT             UUID16(2a4d)
+#define UUID_PNP_ID             UUID16(2a50)
 
 #define GAP_GAMEPAD 0x03C4
 
@@ -42,6 +43,7 @@
 #define REPORT_TYPE_FEATURE 3
 
 #define DESCRIPTOR_SIZE_MAX 4096
+#define REPORT_SIZE_MAX 4096
 #define INTERFACES_MAX 8
 
 bool did_hup = false;
@@ -110,10 +112,12 @@ struct HOGPDevice {
 	struct GattService devinfo;
 	struct GattService battery;
 
+	struct GattCharacteristic appearance;
 	struct GattCharacteristic pnp;
 	struct GattCharacteristic battery_level;
 
 	struct PnPID pnp_data;
+	uint16_t appearance_data;
 };
 
 static const sd_bus_vtable gatt_profile[] = {
@@ -215,6 +219,7 @@ void hogp_create(struct HOGPDevice* hog, const char* namespace, size_t nInterfac
 	char path[PATH_MAX];
 	size_t i;
 	hog->pnp_data.source = 2;
+	hog->appearance_data = htobs(GAP_GAMEPAD);
 
 	snprintf(path, sizeof(path), "%s/service0000", namespace);
 	gatt_service_create(&hog->devinfo, UUID_DEV_INFO, path);
@@ -227,8 +232,8 @@ void hogp_create(struct HOGPDevice* hog, const char* namespace, size_t nInterfac
 	gatt_service_create(&hog->battery, UUID_BATTERY, path);
 	gatt_characteristic_create(&hog->battery_level, UUID_BATTERY_LEVEL, &hog->battery);
 	hog->battery_level.flags = GATT_FLAG_READ;
-	hog->battery_level.data.data = "100%";
-	hog->battery_level.data.size = 4;
+	hog->battery_level.data.data = "d";
+	hog->battery_level.data.size = 1;
 
 	hog->nInterfaces = nInterfaces;
 	for (i = 0; i < nInterfaces; ++i) {
@@ -354,6 +359,10 @@ bool poll_fds(sd_bus* bus, struct HOGPDevice* dev) {
 	struct pollfd fds[INTERFACES_MAX];
 	size_t i;
 	int res;
+	uint8_t buffer[REPORT_SIZE_MAX];
+	ssize_t sizein;
+	ssize_t sizeout;
+	ssize_t loc;
 
 	for (i = 0; i < dev->nInterfaces; ++i) {
 		fds[i].fd = dev->interface[i].fd;
@@ -393,8 +402,32 @@ bool poll_fds(sd_bus* bus, struct HOGPDevice* dev) {
 
 			for (i = 0; i < dev->nInterfaces; ++i) {
 				if (fds[i].revents & POLLIN) {
-				}
-				if (fds[i].revents & POLLPRI) {
+					sizein = read(fds[i].fd, buffer, sizeof(buffer));
+					if (sizein < 0) {
+						if (errno != EINTR) {
+							perror("Failed to read packet");
+						}
+						return did_hup;
+					}
+					fds[i].revents &= ~POLLIN;
+					if (dev->interface[i].input_report.notify_fd < 0) {
+						continue;
+					}
+					loc = 0;
+					while (sizein > 0) {
+						sizeout = write(dev->interface[i].input_report.notify_fd, &buffer[loc], sizein);
+						if (sizeout < 0) {
+							if (errno == EAGAIN) {
+								break;
+							}
+							if (errno != EINTR) {
+								perror("Failed to write packet");
+							}
+							return did_hup;
+						}
+						loc += sizeout;
+						sizein -= sizeout;
+					}
 				}
 			}
 		}
@@ -427,7 +460,7 @@ int main(int argc, char* argv[]) {
 		.type = "peripheral",
 		.uuids = (const char*[]) {UUID_DEV_INFO, UUID_HID, UUID_BATTERY, NULL},
 		.local_name = "USB Gamepad",
-		.appearance = GAP_GAMEPAD,
+		.appearance = htobs(GAP_GAMEPAD),
 	};
 
 	const char* profile[] = {
