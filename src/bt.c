@@ -21,7 +21,7 @@
 #include <sys/fcntl.h>
 #include <unistd.h>
 
-#define UUID16(U) "0000" #U "-0000-1000-8000-00805f9b34fb"
+#define UUID16(U) #U
 
 #define UUID_DEV_INFO  UUID16(180a)
 #define UUID_BATTERY   UUID16(180f)

@@ -31,6 +31,7 @@ clean:
 
 install: all
 	install -Ds -m755 -t "$(DESTDIR)/usr/bin" usbhid-gadget-passthru
+	install -Ds -m755 -t "$(DESTDIR)/usr/bin" usbhid-bt-passthru
 
 src/dev.o: include/dev.h include/log.h include/util.h
 src/options.o: include/options.h
