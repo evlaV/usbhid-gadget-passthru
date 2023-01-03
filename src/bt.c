@@ -272,14 +272,14 @@ void hogp_create(struct HOGPDevice* hog, const char* namespace, size_t nInterfac
 	hog->pnp_data.source = 2;
 	hog->appearance_data = htobs(GAP_GAMEPAD);
 
-	snprintf(path, sizeof(path), "%s/service0000", namespace);
+	snprintf(path, sizeof(path), "%s/dis", namespace);
 	gatt_service_create(&hog->devinfo, UUID_DEV_INFO, path);
 	gatt_characteristic_create(&hog->pnp, UUID_PNP_ID, &hog->devinfo);
 	hog->pnp.flags = GATT_FLAG_READ;
 	hog->pnp.data.data = &hog->pnp_data;
 	hog->pnp.data.size = sizeof(hog->pnp_data);
 
-	snprintf(path, sizeof(path), "%s/service0001", namespace);
+	snprintf(path, sizeof(path), "%s/bas", namespace);
 	gatt_service_create(&hog->battery, UUID_BATTERY, path);
 	gatt_characteristic_create(&hog->battery_level, UUID_BATTERY_LEVEL, &hog->battery);
 	hog->battery_level.flags = GATT_FLAG_READ;
@@ -289,7 +289,7 @@ void hogp_create(struct HOGPDevice* hog, const char* namespace, size_t nInterfac
 
 	hog->nInterfaces = nInterfaces;
 	for (i = 0; i < nInterfaces; ++i) {
-		snprintf(path, sizeof(path), "%s/service%04zx", namespace, i + 2);
+		snprintf(path, sizeof(path), "%s/iface%04zx", namespace, i);
 		hogp_create_interface(&hog->interface[i]);
 		gatt_service_create(&hog->interface[i].hid, UUID_HID, path);
 	}
