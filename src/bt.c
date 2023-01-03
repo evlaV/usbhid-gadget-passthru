@@ -48,6 +48,8 @@
 #define REPORT_SIZE_MAX 512
 #define INTERFACES_MAX 8
 
+#define RARE_LOOP_COUNT 5000
+
 bool did_hup = false;
 bool did_error = false;
 
@@ -110,6 +112,7 @@ struct HOGPInterface {
 struct HOGPDevice {
 	struct HOGPInterface interface[INTERFACES_MAX];
 	size_t nInterfaces;
+	char battery_path[PATH_MAX];
 
 	struct GattService devinfo;
 	struct GattService battery;
@@ -280,8 +283,9 @@ void hogp_create(struct HOGPDevice* hog, const char* namespace, size_t nInterfac
 	gatt_service_create(&hog->battery, UUID_BATTERY, path);
 	gatt_characteristic_create(&hog->battery_level, UUID_BATTERY_LEVEL, &hog->battery);
 	hog->battery_level.flags = GATT_FLAG_READ;
-	hog->battery_level.data.data = "d";
-	hog->battery_level.data.size = 1;
+	buffer_create(&hog->battery_level.data);
+	buffer_alloc(&hog->battery_level.data, 1);
+	*(uint8_t*) hog->battery_level.data.data = 100;
 
 	hog->nInterfaces = nInterfaces;
 	for (i = 0; i < nInterfaces; ++i) {
@@ -400,10 +404,21 @@ bool hogp_setup(struct HOGPDevice* hog, const char* syspath, const char* bus_id)
 	return true;
 }
 
+int hogp_update_battery(sd_bus* bus, struct HOGPDevice* dev) {
+	double percent;
+	int res = sd_bus_get_property_trivial(bus, "org.freedesktop.UPower", dev->battery_path, "org.freedesktop.UPower.Device", "Percentage", NULL, 'd', &percent);
+	if (res < 0) {
+		return res;
+	}
+	*(uint8_t*) dev->battery_level.data.data = percent;
+	return 0;
+}
+
 bool poll_fds(sd_bus* bus, struct HOGPDevice* dev) {
 	struct pollfd fds[INTERFACES_MAX];
 	size_t i;
 	int res;
+	unsigned loop = 0;
 	uint8_t buffer[REPORT_SIZE_MAX];
 	ssize_t sizein;
 	ssize_t sizeout;
@@ -443,6 +458,16 @@ bool poll_fds(sd_bus* bus, struct HOGPDevice* dev) {
 					perror("Failed to poll nodes");
 				}
 				return did_hup;
+			}
+
+			if (loop == 10) {
+				hogp_update_battery(bus, dev);
+			}
+
+			if (loop >= RARE_LOOP_COUNT) {
+				loop = 0;
+			} else {
+				++loop;
 			}
 
 			for (i = 0; i < dev->nInterfaces; ++i) {
@@ -570,6 +595,8 @@ int main(int argc, char* argv[]) {
 	if (!hogp_setup(&hog, syspath, bus_id)) {
 		goto shutdown;
 	}
+
+	strncpy(hog.battery_path, "/org/freedesktop/UPower/devices/battery_BAT0", sizeof(hog.battery_path)); /* TODO: Allow passing */
 
 	res = hogp_register(&hog, bus);
 	if (res < 0) {
