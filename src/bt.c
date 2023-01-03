@@ -48,8 +48,6 @@
 #define REPORT_SIZE_MAX 512
 #define INTERFACES_MAX 8
 
-#define RARE_LOOP_COUNT 5000
-
 bool did_hup = false;
 bool did_error = false;
 
@@ -113,6 +111,7 @@ struct HOGPDevice {
 	struct HOGPInterface interface[INTERFACES_MAX];
 	size_t nInterfaces;
 	char battery_path[PATH_MAX];
+	sd_bus_slot* battery_slot;
 
 	struct GattService devinfo;
 	struct GattService battery;
@@ -280,6 +279,7 @@ void hogp_create(struct HOGPDevice* hog, const char* namespace, size_t nInterfac
 	size_t i;
 	hog->pnp_data.source = 2;
 	hog->appearance_data = htobs(GAP_GAMEPAD);
+	hog->battery_slot = NULL;
 
 	snprintf(path, sizeof(path), "%s/dis", namespace);
 	gatt_service_create(&hog->devinfo, UUID_DEV_INFO, path);
@@ -323,9 +323,65 @@ void hogp_destroy(struct HOGPDevice* hog) {
 	for (i = 0; i < hog->nInterfaces; ++i) {
 		hogp_destroy_interface(&hog->interface[i]);
 	}
+	sd_bus_slot_unref(hog->battery_slot);
 }
 
-static int hogp_register(struct HOGPDevice* hog, sd_bus* bus) {
+static int hogp_update_battery(sd_bus_message* m, void* userdata, sd_bus_error*) {
+	struct HOGPDevice* hog = userdata;
+	int res;
+	const char* iface;
+	const char* property;
+
+	res = sd_bus_message_read_basic(m, 's', &iface);
+	if (res < 0) {
+		return res;
+	}
+
+	if (strcmp(iface, "org.freedesktop.UPower.Device") != 0) {
+		return 0;
+	}
+
+	res = sd_bus_message_enter_container(m, 'a', "{sv}");
+	if (res < 0) {
+		return res;
+	}
+	while ((res = sd_bus_message_enter_container(m, 'e', "sv")) > 0) {
+		char type;
+		res = sd_bus_message_read_basic(m, 's', &property);
+		if (res < 0) {
+			return res;
+		}
+		res = sd_bus_message_peek_type(m, &type, NULL);
+		if (res < 0) {
+			return res;
+		}
+
+		if (strcasecmp(property, "Percentage") != 0) {
+			sd_bus_message_skip(m, NULL);
+		} else {
+			double percentage;
+			res = sd_bus_message_read(m, "v", "d", &percentage);
+			if (res < 0) {
+				return res;
+			}
+			*(uint8_t*) hog->battery_level.data.data = percentage;
+		}
+
+		res = sd_bus_message_exit_container(m);
+		if (res < 0) {
+			return res;
+		}
+	}
+
+	res = sd_bus_message_exit_container(m);
+	if (res < 0) {
+		return res;
+	}
+	return 0;
+}
+
+
+int hogp_register(struct HOGPDevice* hog, sd_bus* bus) {
 	size_t i;
 	int res;
 
@@ -347,6 +403,12 @@ static int hogp_register(struct HOGPDevice* hog, sd_bus* bus) {
 			printf("Failed to publish HID service: %s\n", strerror(-res));
 			return res;
 		}
+	}
+
+	res = sd_bus_match_signal_async(bus, &hog->battery_slot, "org.freedesktop.UPower", hog->battery_path, "org.freedesktop.DBus.Properties", "PropertiesChanged", hogp_update_battery, NULL, hog);
+	if (res < 0) {
+		printf("Failed to subscribe to battery updates: %s\n", strerror(-res));
+		/* This is a non-fatal error, so don't return failure */
 	}
 	return 0;
 }
@@ -413,21 +475,10 @@ bool hogp_setup(struct HOGPDevice* hog, const char* syspath, const char* bus_id)
 	return true;
 }
 
-int hogp_update_battery(sd_bus* bus, struct HOGPDevice* dev) {
-	double percent;
-	int res = sd_bus_get_property_trivial(bus, "org.freedesktop.UPower", dev->battery_path, "org.freedesktop.UPower.Device", "Percentage", NULL, 'd', &percent);
-	if (res < 0) {
-		return res;
-	}
-	*(uint8_t*) dev->battery_level.data.data = percent;
-	return 0;
-}
-
 bool poll_fds(sd_bus* bus, struct HOGPDevice* dev) {
 	struct pollfd fds[INTERFACES_MAX];
 	size_t i;
 	int res;
-	unsigned loop = 0;
 	uint8_t buffer[REPORT_SIZE_MAX];
 	ssize_t sizein;
 	ssize_t sizeout;
@@ -439,16 +490,6 @@ bool poll_fds(sd_bus* bus, struct HOGPDevice* dev) {
 	}
 
 	while (!did_hup) {
-		if (loop == 10) {
-			hogp_update_battery(bus, dev);
-		}
-
-		if (loop >= RARE_LOOP_COUNT) {
-			loop = 0;
-		} else {
-			++loop;
-		}
-
 		res = sd_bus_process(bus, NULL);
 		if (res < 0) {
 			printf("Failed to process bus: %s\n", strerror(-res));
