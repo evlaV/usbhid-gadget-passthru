@@ -483,6 +483,7 @@ bool poll_fds(sd_bus* bus, struct HOGPDevice* dev) {
 	ssize_t sizein;
 	ssize_t sizeout;
 	ssize_t loc;
+	bool do_process = true;
 
 	for (i = 0; i < dev->nInterfaces; ++i) {
 		fds[i].fd = dev->interface[i].fd;
@@ -490,18 +491,28 @@ bool poll_fds(sd_bus* bus, struct HOGPDevice* dev) {
 	}
 
 	while (!did_hup) {
-		res = sd_bus_process(bus, NULL);
-		if (res < 0) {
-			printf("Failed to process bus: %s\n", strerror(-res));
-			break;
+		if (do_process) {
+			res = sd_bus_process(bus, NULL);
+			if (res < 0) {
+				printf("Failed to process bus: %s\n", strerror(-res));
+				break;
+			}
+
+			if (res > 0) {
+				continue;
+			}
+
+			do_process = false;
 		}
 
-		if (res == 0) {
-			res = sd_bus_wait(bus, 4);
-			if (res < 0 && res != -EINTR) {
-				printf("Failed to wait on bus: %s\n", strerror(-res));
-				return false;
-			}
+		res = sd_bus_wait(bus, 4);
+		if (res < 0 && res != -EINTR) {
+			printf("Failed to wait on bus: %s\n", strerror(-res));
+			return false;
+		}
+		if (res > 0) {
+			do_process = true;
+			continue;
 		}
 
 		res = poll(fds, dev->nInterfaces, 6);
