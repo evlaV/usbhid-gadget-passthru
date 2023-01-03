@@ -199,7 +199,6 @@ static int feature_report(const void* data, unsigned size, size_t offset, unsign
 }
 
 void hogp_create_interface(struct HOGPInterface* iface) {
-	memset(iface, 0, sizeof(*iface));
 	iface->hid_info_data.bcdHID = htobs(0x111);
 	iface->hid_info_data.bCountryCode = 0;
 	iface->hid_info_data.flags = 0;
@@ -288,10 +287,11 @@ void hogp_create(struct HOGPDevice* hog, const char* namespace, size_t nInterfac
 	*(uint8_t*) hog->battery_level.data.data = 100;
 
 	hog->nInterfaces = nInterfaces;
+	memset(hog->interface, 0, sizeof(hog->interface));
 	for (i = 0; i < nInterfaces; ++i) {
 		snprintf(path, sizeof(path), "%s/iface%04zx", namespace, i);
-		hogp_create_interface(&hog->interface[i]);
 		gatt_service_create(&hog->interface[i].hid, UUID_HID, path);
+		hogp_create_interface(&hog->interface[i]);
 	}
 }
 
