@@ -402,6 +402,7 @@ void gatt_characteristic_create(struct GattCharacteristic* characteristic, const
 	strncpy(characteristic->uuid, uuid, sizeof(characteristic->uuid) - 1);
 	characteristic->service = parent;
 	characteristic->notify_fd = -1;
+	characteristic->mtu = 517;
 
 	if (parent->nCharacteristics == MAX_GATT_CHAR) {
 		abort();
