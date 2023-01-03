@@ -13,11 +13,13 @@
 #include <dirent.h>
 #include <errno.h>
 #include <limits.h>
+#include <linux/hidraw.h>
 #include <poll.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/ioctl.h>
 #include <sys/fcntl.h>
 #include <unistd.h>
 
@@ -43,7 +45,7 @@
 #define REPORT_TYPE_FEATURE 3
 
 #define DESCRIPTOR_SIZE_MAX 4096
-#define REPORT_SIZE_MAX 4096
+#define REPORT_SIZE_MAX 512
 #define INTERFACES_MAX 8
 
 bool did_hup = false;
@@ -157,27 +159,44 @@ static const sd_bus_vtable le_advertisement[] = {
 	SD_BUS_VTABLE_END
 };
 
-static int output_report(const void* data, size_t size, size_t offset, void* userdata) {
+static int output_report(const void* data, unsigned size, size_t offset, unsigned mtu, void* userdata) {
 	struct HOGPInterface* iface = userdata;
-	(void) iface;
-	(void) data;
-	(void) size;
-	(void) offset;
+	if (offset >= iface->output_report.data.size || offset + size >= iface->output_report.data.size || size >= iface->output_report.data.size) {
+		return -ENOSPC;
+	}
+	memcpy((uint8_t*) iface->output_report.data.data + offset, data, size);
+	if (size < mtu) {
+		return write(iface->fd, iface->output_report.data.data, offset + size) > 0;
+	}
 
 	return 0;
 }
 
-static int feature_report(const void* data, size_t size, size_t offset, void* userdata) {
+static int feature_report(const void* data, unsigned size, size_t offset, unsigned mtu, void* userdata) {
 	struct HOGPInterface* iface = userdata;
-	(void) iface;
-	(void) data;
-	(void) size;
-	(void) offset;
+	if (offset >= iface->feature_report.data.size || offset + size >= iface->feature_report.data.size || size >= iface->feature_report.data.size) {
+		return -ENOSPC;
+	}
+	memcpy((uint8_t*) iface->feature_report.data.data + offset, data, size);
+	if (size < mtu) {
+		int res;
+		res = ioctl(iface->fd, HIDIOCSFEATURE(offset + size), iface->feature_report.data.data);
+		if (res < 0) {
+			perror("SET ioctl out failed");
+			return res;
+		}
+		res = ioctl(iface->fd, HIDIOCGFEATURE(64), iface->feature_report.data.data);
+		if (res < 0) {
+			perror("GET ioctl in failed");
+			return res;
+		}
+	}
 
 	return 0;
 }
 
 void hogp_create_interface(struct HOGPInterface* iface) {
+	memset(iface, 0, sizeof(*iface));
 	iface->hid_info_data.bcdHID = htobs(0x111);
 	iface->hid_info_data.bCountryCode = 0;
 	iface->hid_info_data.flags = 0;
@@ -216,12 +235,14 @@ void hogp_create_interface(struct HOGPInterface* iface) {
 	iface->output_report.write = output_report;
 	iface->output_report.userdata = iface;
 	buffer_create(&iface->output_report.data);
+	buffer_alloc(&iface->output_report.data, REPORT_SIZE_MAX);
 
 	gatt_characteristic_create(&iface->feature_report, UUID_REPORT, &iface->hid);
 	iface->feature_report.flags = GATT_FLAG_RW;
 	iface->feature_report.write = feature_report;
 	iface->feature_report.userdata = iface;
 	buffer_create(&iface->feature_report.data);
+	buffer_alloc(&iface->feature_report.data, 64);
 
 	gatt_descriptor_create(&iface->input_report_reference, UUID_REPORT_REFERENCE, &iface->input_report);
 	iface->input_report_reference.flags = GATT_FLAG_READ;
@@ -265,8 +286,8 @@ void hogp_create(struct HOGPDevice* hog, const char* namespace, size_t nInterfac
 	hog->nInterfaces = nInterfaces;
 	for (i = 0; i < nInterfaces; ++i) {
 		snprintf(path, sizeof(path), "%s/service%04zx", namespace, i + 2);
-		gatt_service_create(&hog->interface[i].hid, UUID_HID, path);
 		hogp_create_interface(&hog->interface[i]);
+		gatt_service_create(&hog->interface[i].hid, UUID_HID, path);
 	}
 }
 
@@ -373,9 +394,6 @@ bool hogp_setup(struct HOGPDevice* hog, const char* syspath, const char* bus_id)
 		hog->interface[i].fd = find_hidraw(syspath_tmp);
 	}
 
-	/* TODO: Hook up Input Report */
-	/* TODO: Hook up Output Report */
-	/* TODO: Hook up Feature Report */
 	/* TODO: Set up HID Control Point characteristic */
 	/* TODO: Figure out Report Map characteristic descriptors */
 
