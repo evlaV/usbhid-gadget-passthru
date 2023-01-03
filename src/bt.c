@@ -439,74 +439,68 @@ bool poll_fds(sd_bus* bus, struct HOGPDevice* dev) {
 	}
 
 	while (!did_hup) {
+		if (loop == 10) {
+			hogp_update_battery(bus, dev);
+		}
+
+		if (loop >= RARE_LOOP_COUNT) {
+			loop = 0;
+		} else {
+			++loop;
+		}
+
 		res = sd_bus_process(bus, NULL);
 		if (res < 0) {
 			printf("Failed to process bus: %s\n", strerror(-res));
 			break;
 		}
-		if (res > 0) {
-			continue;
-		}
 
-		while (!did_hup && !did_error) {
+		if (res == 0) {
 			res = sd_bus_wait(bus, 4);
 			if (res < 0 && res != -EINTR) {
 				printf("Failed to wait on bus: %s\n", strerror(-res));
 				return false;
 			}
-			if (res > 0) {
-				break;
-			}
+		}
 
-			res = poll(fds, dev->nInterfaces, 6);
-			if (res == -EAGAIN) {
-				continue;
+		res = poll(fds, dev->nInterfaces, 6);
+		if (res == -EAGAIN) {
+			continue;
+		}
+		if (res < 0) {
+			if (errno != EINTR) {
+				perror("Failed to poll nodes");
 			}
-			if (res < 0) {
-				if (errno != EINTR) {
-					perror("Failed to poll nodes");
+			return did_hup;
+		}
+
+		for (i = 0; i < dev->nInterfaces; ++i) {
+			if (fds[i].revents & POLLIN) {
+				sizein = read(fds[i].fd, buffer, sizeof(buffer));
+				if (sizein < 0) {
+					if (errno != EINTR) {
+						perror("Failed to read packet");
+					}
+					return did_hup;
 				}
-				return did_hup;
-			}
-
-			if (loop == 10) {
-				hogp_update_battery(bus, dev);
-			}
-
-			if (loop >= RARE_LOOP_COUNT) {
-				loop = 0;
-			} else {
-				++loop;
-			}
-
-			for (i = 0; i < dev->nInterfaces; ++i) {
-				if (fds[i].revents & POLLIN) {
-					sizein = read(fds[i].fd, buffer, sizeof(buffer));
-					if (sizein < 0) {
+				fds[i].revents &= ~POLLIN;
+				if (dev->interface[i].input_report.notify_fd < 0) {
+					continue;
+				}
+				loc = 0;
+				while (sizein > 0) {
+					sizeout = write(dev->interface[i].input_report.notify_fd, &buffer[loc], sizein);
+					if (sizeout < 0) {
+						if (errno == EAGAIN) {
+							break;
+						}
 						if (errno != EINTR) {
-							perror("Failed to read packet");
+							perror("Failed to write packet");
 						}
 						return did_hup;
 					}
-					fds[i].revents &= ~POLLIN;
-					if (dev->interface[i].input_report.notify_fd < 0) {
-						continue;
-					}
-					loc = 0;
-					while (sizein > 0) {
-						sizeout = write(dev->interface[i].input_report.notify_fd, &buffer[loc], sizein);
-						if (sizeout < 0) {
-							if (errno == EAGAIN) {
-								break;
-							}
-							if (errno != EINTR) {
-								perror("Failed to write packet");
-							}
-							return did_hup;
-						}
-						loc += sizeout;
-						sizein -= sizeout;
-					}
+					loc += sizeout;
+					sizein -= sizeout;
 				}
 			}
 		}
