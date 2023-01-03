@@ -173,7 +173,10 @@ static int read_characteristic(sd_bus_message* m, void *userdata, sd_bus_error* 
 static int write_characteristic(sd_bus_message* m, void *userdata, sd_bus_error* error) {
 	struct GattCharacteristic* characteristic = userdata;
 	int res;
-	struct Flags flags = {.reply = true};
+	struct Flags flags = {
+		.reply = true,
+		.mtu = 517
+	};
 	size_t size;
 	const void* data;
 
@@ -195,7 +198,7 @@ static int write_characteristic(sd_bus_message* m, void *userdata, sd_bus_error*
 		return res;
 	}
 
-	return characteristic->write(data, size, flags.offset, characteristic->userdata);
+	return characteristic->write(data, size, flags.offset, flags.mtu, characteristic->userdata);
 }
 
 static int acquire_notify(sd_bus_message* m, void *userdata, sd_bus_error* error) {

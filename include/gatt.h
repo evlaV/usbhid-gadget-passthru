@@ -38,7 +38,7 @@ struct GattCharacteristic {
 	int notify_fd;
 
 	void* userdata;
-	int (*write)(const void* data, size_t size, size_t offset, void* userdata);
+	int (*write)(const void* data, unsigned size, size_t offset, unsigned mtu, void* userdata);
 
 	struct GattDescriptor* descriptors[MAX_GATT_DESC];
 	size_t nDescriptors;
