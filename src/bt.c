@@ -162,6 +162,16 @@ static const sd_bus_vtable le_advertisement[] = {
 	SD_BUS_VTABLE_END
 };
 
+static int hid_control(const void* data, unsigned size, size_t, unsigned, void* userdata) {
+	struct HOGPInterface* iface = userdata;
+	(void) data;
+	(void) size;
+	(void) iface;
+	/* TODO: Set up HID Control Point characteristic */
+	/* TODO: Do we actually care about these? */
+	return 0;
+}
+
 static int output_report(const void* data, unsigned size, size_t offset, unsigned mtu, void* userdata) {
 	struct HOGPInterface* iface = userdata;
 	if (offset >= iface->output_report.data.size || offset + size >= iface->output_report.data.size || size >= iface->output_report.data.size) {
@@ -223,7 +233,7 @@ void hogp_create_interface(struct HOGPInterface* iface) {
 
 	gatt_characteristic_create(&iface->hid_control, UUID_HID_CONTROL, &iface->hid);
 	iface->hid_control.flags = GATT_FLAG_WRITE_NO_RESPONSE;
-	iface->hid_control.write = NULL;
+	iface->hid_control.write = hid_control;
 	buffer_create(&iface->hid_control.data);
 
 	gatt_characteristic_create(&iface->input_report, UUID_REPORT, &iface->hid);
@@ -398,8 +408,7 @@ bool hogp_setup(struct HOGPDevice* hog, const char* syspath, const char* bus_id)
 		hog->interface[i].fd = find_hidraw(syspath_tmp);
 	}
 
-	/* TODO: Set up HID Control Point characteristic */
-	/* TODO: Figure out Report Map characteristic descriptors */
+	/* TODO: Figure out Report Map characteristic descriptors? */
 
 	return true;
 }
@@ -596,7 +605,7 @@ int main(int argc, char* argv[]) {
 		goto shutdown;
 	}
 
-	strncpy(hog.battery_path, "/org/freedesktop/UPower/devices/battery_BAT0", sizeof(hog.battery_path)); /* TODO: Allow passing */
+	strncpy(hog.battery_path, "/org/freedesktop/UPower/devices/battery_BAT1", sizeof(hog.battery_path)); /* TODO: Allow passing */
 
 	res = hogp_register(&hog, bus);
 	if (res < 0) {
