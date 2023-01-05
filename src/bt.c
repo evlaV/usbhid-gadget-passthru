@@ -47,6 +47,7 @@
 #define DESCRIPTOR_SIZE_MAX 4096
 #define REPORT_SIZE_MAX 512
 #define INTERFACES_MAX 8
+#define FLUSH_INTERVAL 12000000ULL
 
 bool did_hup = false;
 bool did_error = false;
@@ -103,6 +104,9 @@ struct HOGPInterface {
 	struct ReportReference input_report_reference_data;
 	struct ReportReference output_report_reference_data;
 	struct ReportReference feature_report_reference_data;
+
+	struct Buffer input_buffer;
+	size_t input_offset;
 
 	int fd;
 };
@@ -270,6 +274,10 @@ void hogp_create_interface(struct HOGPInterface* iface) {
 	iface->feature_report_reference.data.data = &iface->feature_report_reference_data;
 	iface->feature_report_reference.data.size = sizeof(iface->feature_report_reference_data);
 
+	buffer_create(&iface->input_buffer);
+	buffer_alloc(&iface->input_buffer, 256);
+	iface->input_offset = 0;
+
 	iface->id = 0;
 	iface->fd = -1;
 }
@@ -312,6 +320,7 @@ void hogp_destroy_interface(struct HOGPInterface* iface) {
 	buffer_destroy(&iface->feature_report.data);
 	buffer_destroy(&iface->report_map.data);
 	buffer_destroy(&iface->hid_control.data);
+	buffer_destroy(&iface->input_buffer);
 	close(iface->fd);
 }
 
@@ -379,7 +388,6 @@ static int hogp_update_battery(sd_bus_message* m, void* userdata, sd_bus_error*)
 	}
 	return 0;
 }
-
 
 int hogp_register(struct HOGPDevice* hog, sd_bus* bus) {
 	size_t i;
@@ -483,12 +491,19 @@ bool poll_fds(sd_bus* bus, struct HOGPDevice* dev) {
 	ssize_t sizein;
 	ssize_t sizeout;
 	ssize_t loc;
+	uint64_t last_flush;
+	uint64_t timestamp;
 	bool do_process = true;
+	bool do_flush = false;
+	struct timespec ts;
 
 	for (i = 0; i < dev->nInterfaces; ++i) {
 		fds[i].fd = dev->interface[i].fd;
 		fds[i].events = POLLIN | POLLPRI;
 	}
+
+	clock_gettime(CLOCK_MONOTONIC, &ts);
+	last_flush = ts.tv_sec * 1000000000ULL + ts.tv_nsec;
 
 	while (!did_hup) {
 		if (do_process) {
@@ -526,6 +541,13 @@ bool poll_fds(sd_bus* bus, struct HOGPDevice* dev) {
 			return did_hup;
 		}
 
+		clock_gettime(CLOCK_MONOTONIC, &ts);
+		timestamp = ts.tv_sec * 1000000000ULL + ts.tv_nsec;
+		do_flush = timestamp - last_flush >= FLUSH_INTERVAL;
+		if (do_flush) {
+			last_flush = timestamp;
+		}
+
 		for (i = 0; i < dev->nInterfaces; ++i) {
 			if (fds[i].revents & POLLIN) {
 				sizein = read(fds[i].fd, buffer, sizeof(buffer));
@@ -539,9 +561,20 @@ bool poll_fds(sd_bus* bus, struct HOGPDevice* dev) {
 				if (dev->interface[i].input_report.notify_fd < 0) {
 					continue;
 				}
+
+				if (dev->interface[i].input_offset + sizein > dev->interface[i].input_buffer.size) {
+					buffer_realloc(&dev->interface[i].input_buffer, dev->interface[i].input_buffer.size * 2);
+				}
+				memcpy((uint8_t*) dev->interface[i].input_buffer.data + dev->interface[i].input_offset, buffer, sizein);
+				dev->interface[i].input_offset += sizein;
+			}
+
+			sizein = dev->interface[i].input_offset;
+			if (do_flush && sizein) {
+				dev->interface[i].input_offset = 0;
 				loc = 0;
 				while (sizein > 0) {
-					sizeout = write(dev->interface[i].input_report.notify_fd, &buffer[loc], sizein);
+					sizeout = write(dev->interface[i].input_report.notify_fd, (uint8_t*) dev->interface[i].input_buffer.data + loc, sizein);
 					if (sizeout < 0) {
 						if (errno == EAGAIN) {
 							break;
