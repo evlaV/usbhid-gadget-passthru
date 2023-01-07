@@ -29,6 +29,10 @@ struct usb_hidg_report {
 	uint8_t data[64];
 };
 
+struct UdcExtra {
+	char* udc;
+};
+
 #define GADGET_HID_READ_SET_REPORT	_IOR('g', 0x41, struct usb_hidg_report)
 #define GADGET_HID_WRITE_GET_REPORT	_IOW('g', 0x42, struct usb_hidg_report)
 
@@ -374,6 +378,20 @@ bool poll_fds(int* infds, int* outfds, nfds_t nfds) {
 	return true;
 }
 
+static bool udc_parse(void* userdata, int c) {
+	struct UdcExtra* extra = userdata;
+	if (c != 'u') {
+		return false;
+	}
+	extra->udc = strdup(optarg);
+	return true;
+}
+
+static void udc_free(void* userdata) {
+	struct UdcExtra* extra = userdata;
+	free(extra->udc);
+}
+
 int main(int argc, char* argv[]) {
 	char syspath[PATH_MAX];
 	char syspath_tmp[PATH_MAX];
@@ -388,14 +406,27 @@ int main(int argc, char* argv[]) {
 	int i, j;
 	struct sigaction sa;
 	struct Options opts = {0};
+	struct UdcExtra udc_extra = {0};
+	struct OptionsExtra extra = {
+		":u:",
+		(struct option[]) {
+			{"--udc", required_argument, 0, 'u'},
+			{0}
+		},
+		udc_parse,
+		udc_free,
+		" -u, --udc UDC      Select which USB device controller to use for the gadget",
+		&udc_extra
+	};
 	int ok = 1;
+	opts.extra = &extra;
 
 	if (!getopt_parse(argc, argv, &opts)) {
-		usage(argv[0], false);
+		usage(argv[0], false, &extra);
 		goto early_shutdown;
 	}
 	if (opts.usage) {
-		usage(argv[0], true);
+		usage(argv[0], true, &extra);
 		ok = 0;
 		goto early_shutdown;
 	}
@@ -442,8 +473,8 @@ int main(int argc, char* argv[]) {
 		}
 	}
 
-	if (opts.udc) {
-		strncpy(udc, opts.udc, sizeof(udc) - 1);
+	if (udc_extra.udc) {
+		strncpy(udc, udc_extra.udc, sizeof(udc) - 1);
 	} else if (!find_udc(udc)) {
 		log_errno(ERROR, "Could not find UDC");
 		goto shutdown;
