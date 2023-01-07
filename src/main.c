@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: BSD-3-Clause */
 #include "dev.h"
+#include "options.h"
 #include "util.h"
 
 #include <ctype.h>
@@ -386,22 +387,28 @@ int main(int argc, char* argv[]) {
 	unsigned max_interfaces = 0;
 	unsigned i, j;
 	struct sigaction sa;
+	struct Options opts = {0};
 	int ok = 1;
 
-	if (argc < 3 || argc > 4) {
-		puts("Missing arguments");
+	if (!getopt_parse(argc, argv, &opts)) {
+		usage(argv[0], false);
+		goto shutdown;
+	}
+	if (opts.usage) {
+		usage(argv[0], true);
+		getopt_free(&opts);
 		return 0;
 	}
 
 	/* Resolve paths to sysfs nodes */
-	if (strchr(argv[1], ':') && strlen(argv[1]) == 9) {
-		find_dev_by_id(argv[1], syspath_tmp);
+	if (strchr(opts.dev, ':') && strlen(opts.dev) == 9) {
+		find_dev_by_id(opts.dev, syspath_tmp);
 	} else {
-		snprintf(syspath_tmp, sizeof(syspath_tmp), "/sys/bus/usb/devices/%s", argv[1]);
+		snprintf(syspath_tmp, sizeof(syspath_tmp), "/sys/bus/usb/devices/%s", opts.dev);
 	}
 	if (realpath(syspath_tmp, syspath) == NULL) {
 		perror("Failed to resolve sysfs path");
-		return 1;
+		goto shutdown;
 	}
 	strncpy(bus_id, strrchr(syspath_tmp, '/') + 1, sizeof(bus_id) - 1);
 
@@ -409,11 +416,11 @@ int main(int argc, char* argv[]) {
 	fd = vopen("%s/bNumInterfaces", O_RDONLY, 0666, syspath);
 	if (fd < 0) {
 		perror("Failed to open interface count");
-		return 1;
+		goto shutdown;
 	}
 	if (read(fd, tmp, sizeof(tmp)) < 0) {
 		perror("Failed to read interface count");
-		return 1;
+		goto shutdown;
 	}
 	max_interfaces = strtoul(tmp, NULL, 10);
 	if (max_interfaces > INTERFACES_MAX) {
@@ -427,7 +434,7 @@ int main(int argc, char* argv[]) {
 	sigaction(SIGINT, &sa, NULL);
 	sigaction(SIGHUP, &sa, NULL);
 
-	snprintf(configfs, sizeof(configfs), "/sys/kernel/config/usb_gadget/%s", argv[2]);
+	snprintf(configfs, sizeof(configfs), "/sys/kernel/config/usb_gadget/%s", opts.name);
 	if (!create_configfs(configfs, syspath)) {
 		goto shutdown;
 	}
@@ -456,8 +463,8 @@ int main(int argc, char* argv[]) {
 		}
 	}
 
-	if (argc == 4) {
-		strncpy(udc, argv[3], sizeof(udc) - 1);
+	if (opts.udc) {
+		strncpy(udc, opts.udc, sizeof(udc) - 1);
 	} else if (!find_udc(udc)) {
 		perror("Could not find UDC");
 		goto shutdown;
@@ -478,7 +485,7 @@ int main(int argc, char* argv[]) {
 		ret = fcntl(hidg[j], F_GETFL, 0);
 		if (ret < 0) {
 			perror("Failed to get dev flags");
-			goto shutdown;
+			goto late_shutdown;
 		}
 		fcntl(hidg[j], F_SETFL, ret | FNONBLOCK);
 		snprintf(syspath_tmp, sizeof(syspath_tmp), "%s/%s:1.%u", syspath, bus_id, i);
@@ -492,14 +499,14 @@ int main(int argc, char* argv[]) {
 					close(hidraw[i]);
 				}
 			}
-			goto shutdown;
+			goto late_shutdown;
 		}
 		++j;
 	}
 	max_interfaces = j;
 
 	if (did_hup) {
-		goto shutdown;
+		goto late_shutdown;
 	}
 
 	ok = !poll_fds(hidraw, hidg, max_interfaces);
@@ -509,8 +516,9 @@ int main(int argc, char* argv[]) {
 		close(hidraw[i]);
 	}
 
-shutdown:
+late_shutdown:
 	stop_udc(configfs);
+shutdown:
 	snprintf(syspath_tmp, sizeof(syspath_tmp), "%s/strings/0x409", configfs);
 	rmdir(syspath_tmp);
 	snprintf(syspath_tmp, sizeof(syspath_tmp), "%s/configs/c.1/strings/0x409", configfs);
@@ -524,5 +532,6 @@ shutdown:
 	snprintf(syspath_tmp, sizeof(syspath_tmp), "%s/configs/c.1", configfs);
 	rmdir(syspath_tmp);
 	rmdir(configfs);
+	getopt_free(&opts);
 	return ok;
 }

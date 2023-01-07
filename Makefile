@@ -11,6 +11,7 @@ endif
 OBJS=\
 	src/dev.o \
 	src/main.o \
+	src/options.o \
 	src/util.o
 
 .PHONY: clean install
@@ -22,7 +23,8 @@ install: all
 	install -Ds -m755 -t "$(DESTDIR)/usr/bin" usbhid-gadget-passthru
 
 src/dev.o: include/util.h
-src/main.o: include/dev.h include/util.h
+src/main.o: include/dev.h include/options.h include/util.h
+src/options.o: include/options.h
 src/util.o: include/util.h
 
 usbhid-gadget-passthru: $(OBJS)
