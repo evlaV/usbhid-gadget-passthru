@@ -451,7 +451,7 @@ int main(int argc, char* argv[]) {
 	sigaction(SIGINT, &sa, NULL);
 	sigaction(SIGHUP, &sa, NULL);
 
-	snprintf(configfs, sizeof(configfs), "/sys/kernel/config/usb_gadget/%s", opts.name);
+	snprintf(configfs, sizeof(configfs), "/sys/kernel/config/usb_gadget/%s", opts.name ? opts.name : "passthru");
 	if (!create_configfs(configfs, syspath)) {
 		goto shutdown;
 	}
