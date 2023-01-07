@@ -131,6 +131,8 @@ struct HOGPDevice {
 
 struct BtExtra {
 	char* battery;
+	unsigned long hci;
+	bool hci_chosen;
 };
 
 static const sd_bus_vtable gatt_profile[] = {
@@ -600,11 +602,20 @@ bool poll_fds(sd_bus* bus, struct HOGPDevice* dev) {
 
 static bool bto_parse(void* userdata, int c) {
 	struct BtExtra* extra = userdata;
-	if (c != 'b') {
-		return false;
+	char* end;
+	switch (c) {
+	case 'b':
+		extra->battery = strdup(optarg);
+		return true;
+	case 'i':
+		extra->hci = strtoul(optarg, &end, 0);
+		if (!end[0]) {
+			extra->hci_chosen = true;
+			return true;
+		}
+		break;
 	}
-	extra->battery = strdup(optarg);
-	return true;
+	return false;
 }
 
 static void bto_free(void* userdata) {
@@ -643,14 +654,16 @@ int main(int argc, char* argv[]) {
 	};
 	struct BtExtra bt_extra = {0};
 	struct OptionsExtra extra = {
-		":b:",
+		":b:i:",
 		(struct option[]) {
 			{"--battery", required_argument, 0, 'b'},
+			{"--hci", required_argument, 0, 'i'},
 			{0}
 		},
 		bto_parse,
 		bto_free,
-		" -b, --battery BAT  Select which battery to relay over the Battery Service",
+		" -b, --battery BAT  Select which battery to relay over the Battery Service\n"
+		" -i, --hci INDEX    Select the index of the HCI to use",
 		&bt_extra
 	};
 	struct Options opts = {0};
@@ -696,10 +709,14 @@ int main(int argc, char* argv[]) {
 	}
 
 	/* Set up D-Bus/BlueZ */
-	hci = hci_get_route(NULL); /* TODO: Allow passing HCI address? */
-	if (hci < 0) {
-		perror("Failed to get default HCI");
-		goto shutdown;
+	if (bt_extra.hci_chosen) {
+		hci = bt_extra.hci;
+	} else {
+		hci = hci_get_route(NULL);
+		if (hci < 0) {
+			perror("Failed to get default HCI");
+			goto shutdown;
+		}
 	}
 
 	snprintf(gatt_manager, sizeof(gatt_manager), "/org/bluez/hci%i", hci);
