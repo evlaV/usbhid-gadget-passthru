@@ -129,6 +129,10 @@ struct HOGPDevice {
 	uint16_t appearance_data;
 };
 
+struct BtExtra {
+	char* battery;
+};
+
 static const sd_bus_vtable gatt_profile[] = {
 	SD_BUS_VTABLE_START(0),
 	SD_BUS_PROPERTY("UUIDs", "as", read_string_array, 0, SD_BUS_VTABLE_PROPERTY_CONST),
@@ -594,6 +598,20 @@ bool poll_fds(sd_bus* bus, struct HOGPDevice* dev) {
 	return true;
 }
 
+static bool bto_parse(void* userdata, int c) {
+	struct BtExtra* extra = userdata;
+	if (c != 'b') {
+		return false;
+	}
+	extra->battery = strdup(optarg);
+	return true;
+}
+
+static void bto_free(void* userdata) {
+	struct BtExtra* extra = userdata;
+	free(extra->battery);
+}
+
 int main(int argc, char* argv[]) {
 	char syspath[PATH_MAX];
 	char bus_id[32];
@@ -601,6 +619,7 @@ int main(int argc, char* argv[]) {
 	char dbus_path[PATH_MAX] = {0};
 	bool is_hid[INTERFACES_MAX] = {0};
 	const char* name;
+	const char* battery = "battery_BAT1";
 	struct sigaction sa;
 	int max_interfaces;
 	int ok = 1;
@@ -622,6 +641,18 @@ int main(int argc, char* argv[]) {
 		.local_name = "USB Gamepad",
 		.appearance = htobs(GAP_GAMEPAD),
 	};
+	struct BtExtra bt_extra = {0};
+	struct OptionsExtra extra = {
+		":b:",
+		(struct option[]) {
+			{"--battery", required_argument, 0, 'b'},
+			{0}
+		},
+		bto_parse,
+		bto_free,
+		" -b, --battery BAT  Select which battery to relay over the Battery Service",
+		&bt_extra
+	};
 	struct Options opts = {0};
 
 	const char* profile[] = {
@@ -629,24 +660,25 @@ int main(int argc, char* argv[]) {
 		NULL
 	};
 
+	opts.extra = &extra;
 	if (!getopt_parse(argc, argv, &opts)) {
-		usage(argv[0], false, NULL);
+		usage(argv[0], false, &extra);
 		goto shutdown;
 	}
 	if (opts.usage) {
-		usage(argv[0], true, NULL);
+		usage(argv[0], true, &extra);
 		getopt_free(&opts);
 		return 0;
 	}
 
 	/* Resolve paths to sysfs nodes */
 	if (!find_sysfs_path(opts.dev, syspath, bus_id)) {
-		return 1;
+		goto shutdown;
 	}
 
 	max_interfaces = interface_count(syspath);
 	if (max_interfaces < 0) {
-		return 1;
+		goto shutdown;
 	}
 
 	if (max_interfaces > INTERFACES_MAX) {
@@ -667,7 +699,7 @@ int main(int argc, char* argv[]) {
 	hci = hci_get_route(NULL); /* TODO: Allow passing HCI address? */
 	if (hci < 0) {
 		perror("Failed to get default HCI");
-		return 1;
+		goto shutdown;
 	}
 
 	snprintf(gatt_manager, sizeof(gatt_manager), "/org/bluez/hci%i", hci);
@@ -675,7 +707,7 @@ int main(int argc, char* argv[]) {
 	res = sd_bus_open_system(&bus);
 	if (res < 0) {
 		printf("Failed to connect to system D-Bus: %s\n", strerror(-res));
-		return 1;
+		goto shutdown;
 	}
 
 	if (opts.name) {
@@ -698,7 +730,10 @@ int main(int argc, char* argv[]) {
 		goto shutdown;
 	}
 
-	strncpy(hog.battery_path, "/org/freedesktop/UPower/devices/battery_BAT1", sizeof(hog.battery_path)); /* TODO: Allow passing */
+	if (bt_extra.battery) {
+		battery = bt_extra.battery;
+	}
+	snprintf(hog.battery_path, sizeof(hog.battery_path), "/org/freedesktop/UPower/devices/%s", battery);
 
 	res = hogp_register(&hog, bus);
 	if (res < 0) {
