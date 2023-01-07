@@ -415,7 +415,9 @@ int main(int argc, char* argv[]) {
 		},
 		udc_parse,
 		udc_free,
-		" -u, --udc UDC      Select which USB device controller to use for the gadget",
+		(const char*[]) {
+			" -u, --udc UDC      Select which USB device controller to use for the gadget"
+		},
 		&udc_extra
 	};
 	int ok = 1;

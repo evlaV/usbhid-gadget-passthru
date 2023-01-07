@@ -9,7 +9,7 @@ struct OptionsExtra {
 	struct option* options;
 	bool (*parse)(void* userdata, int c);
 	void (*free)(void* userdata);
-	const char* usage;
+	const char** usage;
 	void* userdata;
 };
 

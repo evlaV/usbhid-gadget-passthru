@@ -662,8 +662,11 @@ int main(int argc, char* argv[]) {
 		},
 		bto_parse,
 		bto_free,
-		" -b, --battery BAT  Select which battery to relay over the Battery Service\n"
-		" -i, --hci INDEX    Select the index of the HCI to use",
+		(const char*[]) {
+			" -b, --battery BAT  Select which battery to relay over the Battery Service",
+			" -i, --hci INDEX    Select the index of the HCI to use",
+			NULL
+		},
 		&bt_extra
 	};
 	struct Options opts = {0};

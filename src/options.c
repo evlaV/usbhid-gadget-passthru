@@ -79,18 +79,34 @@ void getopt_free(struct Options* opts) {
 }
 
 void usage(const char* argv0, bool help, struct OptionsExtra* extra) {
+	static const char* options[] = {
+		" -h, --help         Print out this help",
+		" -n, --name NAME    Name of the passthru device, used in system paths",
+		" -q, --quiet        Print less output",
+		" -v, --verbose      Print more output",
+		NULL
+	};
+	size_t oindex;
+	size_t eindex;
 	if (help) {
 		puts("USB HID device passthrough");
 		puts("Copyright (c) 2022 Valve Software");
 	}
 	printf("Usage: %s [options] device\n", argv0);
 	puts("\nOptions:");
-	puts(" -h, --help         Print out this help");
-	puts(" -n, --name NAME    Name of the passthru device, used in system paths");
-	puts(" -q, --quiet        Print less output");
-	puts(" -v, --verbose      Print more output");
-	if (extra) {
-		puts(extra->usage);
+	for (oindex = eindex = 0; options[oindex] || (extra && extra->usage[eindex]);) {
+		if (extra && extra->usage[eindex]) {
+			if (options[oindex] && strcasecmp(options[oindex], extra->usage[eindex]) < 0) {
+				puts(options[oindex]);
+				++oindex;
+				continue;
+			}
+			puts(extra->usage[eindex]);
+			++eindex;
+			continue;
+		}
+		puts(options[oindex]);
+		++oindex;
 	}
 	puts("\nThe device name may be either specified as a bus ID, as seen in "
 	     "/sys/bus/usb/devices, or a VID:PID combination, in which case the first device "
