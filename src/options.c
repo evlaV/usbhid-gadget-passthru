@@ -7,8 +7,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-static char* default_name = "passthru";
-
 bool getopt_parse(int argc, char* argv[], struct Options* opts) {
 	static const char* flags = ":hn:qv";
 	static const struct option long_flags[] = {
@@ -19,7 +17,6 @@ bool getopt_parse(int argc, char* argv[], struct Options* opts) {
 		{0}
 	};
 	int c;
-	opts->name = default_name;
 
 	while ((c = getopt_long(argc, argv, flags, long_flags, NULL)) != -1) {
 		switch (c) {
@@ -76,7 +73,7 @@ void getopt_free(struct Options* opts) {
 	if (opts->dev) {
 		free(opts->dev);
 	}
-	if (opts->name != default_name) {
+	if (opts->name) {
 		free(opts->name);
 	}
 }

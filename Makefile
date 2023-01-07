@@ -38,9 +38,10 @@ src/options.o: include/options.h
 src/usb.o: include/usb.h include/dev.h include/log.h include/util.h
 src/util.o: include/util.h include/log.h
 
-src/bt.o: include/dbus.h include/dev.h include/gatt.h include/usb.h include/util.h
 src/dbus.o: include/dbus.h
 src/gatt.o: include/dbus.h include/gatt.h
+
+src/bt.o: include/dbus.h include/dev.h include/gatt.h include/options.h include/usb.h include/util.h
 src/udc.o: include/dev.h include/log.h include/options.h include/usb.h include/util.h
 
 include/gatt.h: include/dbus.h

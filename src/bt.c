@@ -2,6 +2,7 @@
 #include "dbus.h"
 #include "dev.h"
 #include "gatt.h"
+#include "options.h"
 #include "usb.h"
 #include "util.h"
 
@@ -597,6 +598,7 @@ int main(int argc, char* argv[]) {
 	char syspath[PATH_MAX];
 	char bus_id[32];
 	char gatt_manager[PATH_MAX];
+	char dbus_path[PATH_MAX] = {0};
 	bool is_hid[INTERFACES_MAX] = {0};
 	const char* name;
 	struct sigaction sa;
@@ -620,19 +622,25 @@ int main(int argc, char* argv[]) {
 		.local_name = "USB Gamepad",
 		.appearance = htobs(GAP_GAMEPAD),
 	};
+	struct Options opts = {0};
 
 	const char* profile[] = {
 		UUID_HID,
 		NULL
 	};
 
-	if (argc != 2) {
-		puts("Missing argument");
+	if (!getopt_parse(argc, argv, &opts)) {
+		usage(argv[0], false, NULL);
+		goto shutdown;
+	}
+	if (opts.usage) {
+		usage(argv[0], true, NULL);
+		getopt_free(&opts);
 		return 0;
 	}
 
 	/* Resolve paths to sysfs nodes */
-	if (!find_sysfs_path(argv[1], syspath, bus_id)) {
+	if (!find_sysfs_path(opts.dev, syspath, bus_id)) {
 		return 1;
 	}
 
@@ -670,7 +678,13 @@ int main(int argc, char* argv[]) {
 		return 1;
 	}
 
-	res = sd_bus_add_object_vtable(bus, &profile_slot, "/com/valvesoftware/Deck",
+	if (opts.name) {
+		snprintf(dbus_path, sizeof(dbus_path) - 1, "/%s", opts.name);
+	} else {
+		strncpy(dbus_path, "/com/valvesoftware/usbhid_passthru", sizeof(dbus_path) - 1);
+	}
+
+	res = sd_bus_add_object_vtable(bus, &profile_slot, dbus_path,
 		 "org.bluez.GattProfile1", gatt_profile, profile);
 	if (res < 0) {
 		printf("Failed to publish profile: %s\n", strerror(-res));
@@ -678,7 +692,7 @@ int main(int argc, char* argv[]) {
 	}
 
 	/* Create HoG device */
-	hogp_create(&hog, "/com/valvesoftware/Deck", max_interfaces);
+	hogp_create(&hog, dbus_path, max_interfaces);
 
 	if (!hogp_setup(&hog, syspath, bus_id)) {
 		goto shutdown;
@@ -693,28 +707,28 @@ int main(int argc, char* argv[]) {
 	}
 
 	/* Publish all of it */
-	res = sd_bus_add_object_vtable(bus, &advert_slot, "/com/valvesoftware/Deck/advert",
+	res = sd_bus_add_object_vtable(bus, &advert_slot, dbus_path,
 		 "org.bluez.LEAdvertisement1", le_advertisement, &advertisement);
 	if (res < 0) {
 		printf("Failed to publish advertisement: %s\n", strerror(-res));
 		goto shutdown;
 	}
 
-	res = sd_bus_add_object_manager(bus, &object_manager_slot, "/com/valvesoftware/Deck");
+	res = sd_bus_add_object_manager(bus, &object_manager_slot, dbus_path);
 	if (res < 0) {
 		printf("Failed to add object manager: %s\n", strerror(-res));
 		goto shutdown;
 	}
 
 	res = sd_bus_call_method_async(bus, &register_advert_slot, "org.bluez", gatt_manager, "org.bluez.LEAdvertisingManager1",
-		"RegisterAdvertisement", register_advert_cb, &advertisement, "oa{sv}", "/com/valvesoftware/Deck", 0, NULL);
+		"RegisterAdvertisement", register_advert_cb, &advertisement, "oa{sv}", dbus_path, 0, NULL);
 	if (res < 0) {
 		printf("Failed to register advertisement: %s\n", error.message);
 		goto shutdown;
 	}
 
 	res = sd_bus_call_method_async(bus, &register_service_slot, "org.bluez", gatt_manager, "org.bluez.GattManager1",
-		"RegisterApplication", register_application_cb, NULL, "oa{sv}", "/com/valvesoftware/Deck", 0, NULL);
+		"RegisterApplication", register_application_cb, NULL, "oa{sv}", dbus_path, 0, NULL);
 	if (res < 0) {
 		printf("Failed to register application: %s\n", strerror(-res));
 		goto shutdown;
@@ -738,11 +752,12 @@ int main(int argc, char* argv[]) {
 	}
 
 shutdown:
+	getopt_free(&opts);
 	sd_bus_call_method(bus, "org.bluez", gatt_manager, "org.bluez.GattManager1", "UnregisterApplication",
-		&error, &reply, "o", "/com/valvesoftware/Deck");
+		&error, &reply, "o", dbus_path);
 	sd_bus_message_unref(reply);
 	sd_bus_call_method(bus, "org.bluez", gatt_manager, "org.bluez.LEAdvertisingManager1", "UnregisterAdvertisement",
-		&error, &reply, "o", "/com/valvesoftware/Deck");
+		&error, &reply, "o", dbus_path);
 	sd_bus_message_unref(reply);
 	sd_bus_slot_unref(object_manager_slot);
 	sd_bus_slot_unref(register_service_slot);
