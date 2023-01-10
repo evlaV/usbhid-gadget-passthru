@@ -48,7 +48,7 @@
 #define DESCRIPTOR_SIZE_MAX 4096
 #define REPORT_SIZE_MAX 512
 #define INTERFACES_MAX 8
-#define FLUSH_INTERVAL 12000000ULL
+#define FLUSH_INTERVAL 15000000ULL
 
 bool did_hup = false;
 bool did_error = false;
@@ -569,11 +569,11 @@ bool poll_fds(sd_bus* bus, struct HOGPDevice* dev) {
 					continue;
 				}
 
-				if (dev->interface[i].input_offset + sizein > dev->interface[i].input_buffer.size) {
-					buffer_realloc(&dev->interface[i].input_buffer, dev->interface[i].input_buffer.size * 2);
+				if ((size_t) sizein > dev->interface[i].input_buffer.size) {
+					buffer_realloc(&dev->interface[i].input_buffer, sizein);
 				}
-				memcpy((uint8_t*) dev->interface[i].input_buffer.data + dev->interface[i].input_offset, buffer, sizein);
-				dev->interface[i].input_offset += sizein;
+				memcpy(dev->interface[i].input_buffer.data, buffer, sizein);
+				dev->interface[i].input_offset = sizein;
 			}
 
 			sizein = dev->interface[i].input_offset;
