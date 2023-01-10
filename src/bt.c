@@ -51,7 +51,7 @@
 #define DESCRIPTOR_SIZE_MAX 4096
 #define REPORT_SIZE_MAX 512
 #define INTERFACES_MAX 8
-#define FLUSH_INTERVAL 15000000ULL
+#define FLUSH_INTERVAL 8000000ULL
 
 bool did_hup = false;
 bool did_error = false;
@@ -528,7 +528,7 @@ bool poll_fds(sd_bus* bus, struct HOGPDevice* dev) {
 			do_process = false;
 		}
 
-		res = sd_bus_wait(bus, 4);
+		res = sd_bus_wait(bus, 1);
 		if (res < 0 && res != -EINTR) {
 			printf("Failed to wait on bus: %s\n", strerror(-res));
 			return false;
@@ -538,7 +538,7 @@ bool poll_fds(sd_bus* bus, struct HOGPDevice* dev) {
 			continue;
 		}
 
-		res = poll(fds, dev->nInterfaces, 6);
+		res = poll(fds, dev->nInterfaces, 4);
 		if (res == -EAGAIN) {
 			continue;
 		}
