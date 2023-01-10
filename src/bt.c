@@ -26,12 +26,15 @@
 
 #define UUID16(U) #U
 
+/* Services */
 #define UUID_DEV_INFO  UUID16(180a)
 #define UUID_BATTERY   UUID16(180f)
 #define UUID_HID       UUID16(1812)
 
+/* Descriptors */
 #define UUID_REPORT_REFERENCE UUID16(2908)
 
+/* Characteristics */
 #define UUID_BATTERY_LEVEL      UUID16(2a19)
 #define UUID_HID_INFO           UUID16(2a4a)
 #define UUID_REPORT_MAP         UUID16(2a4b)
@@ -496,8 +499,6 @@ bool poll_fds(sd_bus* bus, struct HOGPDevice* dev) {
 	int res;
 	uint8_t buffer[REPORT_SIZE_MAX];
 	ssize_t sizein;
-	ssize_t sizeout;
-	ssize_t loc;
 	uint64_t last_flush;
 	uint64_t timestamp;
 	bool do_process = true;
@@ -579,20 +580,15 @@ bool poll_fds(sd_bus* bus, struct HOGPDevice* dev) {
 			sizein = dev->interface[i].input_offset;
 			if (do_flush && sizein) {
 				dev->interface[i].input_offset = 0;
-				loc = 0;
-				while (sizein > 0) {
-					sizeout = write(dev->interface[i].input_report.notify_fd, (uint8_t*) dev->interface[i].input_buffer.data + loc, sizein);
-					if (sizeout < 0) {
-						if (errno == EAGAIN) {
-							break;
-						}
-						if (errno != EINTR) {
-							perror("Failed to write packet");
-						}
-						return did_hup;
+				res = write(dev->interface[i].input_report.notify_fd, dev->interface[i].input_buffer.data, sizein);
+				if (res < 0) {
+					if (errno == EAGAIN) {
+						continue;
 					}
-					loc += sizeout;
-					sizein -= sizeout;
+					if (errno != EINTR) {
+						perror("Failed to write packet");
+					}
+					return did_hup;
 				}
 			}
 		}
