@@ -14,7 +14,7 @@ else ifneq ($(DEBUG),)
   CFLAGS += -g
   LDFLAGS += -g
 else
-  CFLAGS += -O2 -D_FORTIFY_SOURCE=2
+  CFLAGS += -O3 -D_FORTIFY_SOURCE=2
 endif
 
 OBJS=\
@@ -27,13 +27,14 @@ OBJS=\
 .PHONY: clean install
 
 clean:
-	rm -f usbhid-gadget-passthru usbhid-bt-passthru $(OBJS) src/bt.o src/dbus.o src/gatt.o src/udc.o
+	rm -f usbhid-gadget-passthru usbhid-bt-passthru $(OBJS) src/bt.o src/dbus.o src/filter.o src/gatt.o src/udc.o
 
 install: all
 	install -Ds -m755 -t "$(DESTDIR)/usr/bin" usbhid-gadget-passthru
 	install -Ds -m755 -t "$(DESTDIR)/usr/bin" usbhid-bt-passthru
 
 src/dev.o: include/dev.h include/log.h include/util.h
+src/filter.o: include/filter.h
 src/options.o: include/options.h
 src/usb.o: include/usb.h include/dev.h include/log.h include/util.h
 src/util.o: include/util.h include/log.h
@@ -41,7 +42,7 @@ src/util.o: include/util.h include/log.h
 src/dbus.o: include/dbus.h
 src/gatt.o: include/dbus.h include/gatt.h
 
-src/bt.o: include/dbus.h include/dev.h include/gatt.h include/options.h include/usb.h include/util.h
+src/bt.o: include/dbus.h include/dev.h include/filter.h include/gatt.h include/options.h include/usb.h include/util.h
 src/udc.o: include/dev.h include/log.h include/options.h include/usb.h include/util.h
 
 include/gatt.h: include/dbus.h
@@ -52,5 +53,5 @@ src/dbus.o src/gatt.o: CFLAGS += $(SDBUS_CFLAGS)
 usbhid-gadget-passthru: $(OBJS) src/udc.o
 	$(CC) $(LDFLAGS) -o $@ $^
 
-usbhid-bt-passthru: $(OBJS) src/bt.o src/dbus.o src/gatt.o
+usbhid-bt-passthru: $(OBJS) src/bt.o src/dbus.o src/filter.o src/gatt.o
 	$(CC) $(LDFLAGS) $(BLUEZ_LDFLAGS) $(SDBUS_LDFLAGS) -o $@ $^
