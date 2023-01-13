@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: BSD-3-Clause */
 #include "dbus.h"
 #include "dev.h"
+#include "filter.h"
 #include "gatt.h"
 #include "options.h"
 #include "usb.h"
@@ -51,7 +52,7 @@
 #define DESCRIPTOR_SIZE_MAX 4096
 #define REPORT_SIZE_MAX 512
 #define INTERFACES_MAX 8
-#define FLUSH_INTERVAL 8000000ULL
+#define FLUSH_INTERVAL 24000000ULL
 
 bool did_hup = false;
 bool did_error = false;
@@ -503,6 +504,8 @@ bool poll_fds(sd_bus* bus, struct HOGPDevice* dev) {
 	uint64_t timestamp;
 	bool do_process = true;
 	bool do_flush = false;
+	bool flush_this = false;
+	bool is_deck = dev->pnp_data.vid == VID_VALVE && dev->pnp_data.pid == PID_STEAM_DECK;
 	struct timespec ts;
 
 	for (i = 0; i < dev->nInterfaces; ++i) {
@@ -557,6 +560,7 @@ bool poll_fds(sd_bus* bus, struct HOGPDevice* dev) {
 		}
 
 		for (i = 0; i < dev->nInterfaces; ++i) {
+			flush_this = true;
 			if (fds[i].revents & POLLIN) {
 				sizein = read(fds[i].fd, buffer, sizeof(buffer));
 				if (sizein < 0) {
@@ -573,12 +577,16 @@ bool poll_fds(sd_bus* bus, struct HOGPDevice* dev) {
 				if ((size_t) sizein > dev->interface[i].input_buffer.size) {
 					buffer_realloc(&dev->interface[i].input_buffer, sizein);
 				}
-				memcpy(dev->interface[i].input_buffer.data, buffer, sizein);
+				if (is_deck && i == DECK_RAW_IFACE) {
+					flush_this = filter_update(&deck_filter, dev->interface[i].input_buffer.data, buffer, sizein);
+				} else {
+					memcpy(dev->interface[i].input_buffer.data, buffer, sizein);
+				}
 				dev->interface[i].input_offset = sizein;
 			}
 
 			sizein = dev->interface[i].input_offset;
-			if (do_flush && sizein) {
+			if ((flush_this || do_flush) && sizein) {
 				dev->interface[i].input_offset = 0;
 				res = write(dev->interface[i].input_report.notify_fd, dev->interface[i].input_buffer.data, sizein);
 				if (res < 0) {
