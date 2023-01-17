@@ -201,10 +201,19 @@ static int output_report(const void* data, unsigned size, size_t offset, unsigne
 
 static int feature_report(const void* data, unsigned size, size_t offset, unsigned mtu, void* userdata) {
 	struct HOGPInterface* iface = userdata;
-	if (offset >= iface->feature_report.data.size || offset + size >= iface->feature_report.data.size || size >= iface->feature_report.data.size) {
+	if (!offset) {
+		--size;
+	} else {
+		--offset;
+	}
+	if (offset >= iface->feature_report.data.size || offset + size > iface->feature_report.data.size || size > iface->feature_report.data.size) {
 		return -ENOSPC;
 	}
-	memcpy((uint8_t*) iface->feature_report.data.data + offset, data, size);
+	if (offset) {
+		memcpy((uint8_t*) iface->feature_report.data.data + offset, data, size);
+	} else {
+		memcpy((uint8_t*) iface->feature_report.data.data, (const uint8_t*) data + 1, size);
+	}
 	if (size < mtu) {
 		int res;
 		res = ioctl(iface->fd, HIDIOCSFEATURE(offset + size), iface->feature_report.data.data);
