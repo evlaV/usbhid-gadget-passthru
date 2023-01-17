@@ -184,6 +184,11 @@ static int write_characteristic(sd_bus_message* m, void *userdata, sd_bus_error*
 		return sd_bus_error_set(error, "org.bluez.Error.NotSupported", "Writing not supported");
 	}
 
+	res = sd_bus_message_read_array(m, 'y', &data, &size);
+	if (res < 0) {
+		return res;
+	}
+
 	res = parse_flags(m, &flags, error);
 	if (res < 0 || sd_bus_error_is_set(error)) {
 		return res;
@@ -191,11 +196,6 @@ static int write_characteristic(sd_bus_message* m, void *userdata, sd_bus_error*
 
 	if (!flags.reply && !(characteristic->flags & GATT_FLAG_WRITE_NO_RESPONSE)) {
 		return sd_bus_error_set(error, "org.bluez.Error.NotSupported", "Writing without response not supported");
-	}
-
-	res = sd_bus_message_read_array(m, 'y', &data, &size);
-	if (res < 0) {
-		return res;
 	}
 
 	return characteristic->write(data, size, flags.offset, flags.mtu, characteristic->userdata);
