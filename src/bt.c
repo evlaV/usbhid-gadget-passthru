@@ -570,6 +570,7 @@ bool poll_fds(sd_bus* bus, struct HOGPDevice* dev) {
 
 		for (i = 0; i < dev->nInterfaces; ++i) {
 			flush_this = true;
+			sizein = 0;
 			if (fds[i].revents & POLLIN) {
 				sizein = read(fds[i].fd, buffer, sizeof(buffer));
 				if (sizein < 0) {
