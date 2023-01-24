@@ -39,7 +39,7 @@ static const sd_bus_vtable gatt_characteristic[] = {
 	SD_BUS_PROPERTY("MTU", "q", read_uint16, offsetof(struct GattCharacteristic, mtu), SD_BUS_VTABLE_PROPERTY_CONST),
 	SD_BUS_PROPERTY("NotifyAcquired", "b", read_bool, offsetof(struct GattCharacteristic, notify_acquired), 0),
 	SD_BUS_METHOD_WITH_ARGS("ReadValue", "a{sv}", "ay", read_characteristic, 0),
-	SD_BUS_METHOD_WITH_ARGS("WriteValue", "aya{sv}", "ay", write_characteristic, 0),
+	SD_BUS_METHOD_WITH_ARGS("WriteValue", "aya{sv}", SD_BUS_NO_RESULT, write_characteristic, 0),
 	SD_BUS_METHOD_WITH_ARGS("AcquireNotify", "a{sv}", "hq", acquire_notify, 0),
 	SD_BUS_VTABLE_END
 };
@@ -207,7 +207,11 @@ static int write_characteristic(sd_bus_message* m, void *userdata, sd_bus_error*
 		return sd_bus_error_set(error, "org.bluez.Error.NotSupported", "Writing without response not supported");
 	}
 
-	return characteristic->write(data, size, flags.offset, flags.mtu, characteristic->userdata);
+	res = characteristic->write(data, size, flags.offset, flags.mtu, characteristic->userdata);
+	if (res < 0) {
+		return res;
+	}
+	return sd_bus_reply_method_return(m, NULL);
 }
 
 static int acquire_notify(sd_bus_message* m, void *userdata, sd_bus_error* error) {
