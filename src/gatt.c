@@ -59,6 +59,7 @@ static int parse_flags(sd_bus_message* m, struct Flags* flags, sd_bus_error*) {
 
 	res = sd_bus_message_enter_container(m, 'a', "{sv}");
 	if (res < 0) {
+		fprintf(stderr, "Failed to enter flags container (%i)\n", -res);
 		return res;
 	}
 
@@ -66,6 +67,7 @@ static int parse_flags(sd_bus_message* m, struct Flags* flags, sd_bus_error*) {
 		char type;
 		res = sd_bus_message_read(m, "s", &opt);
 		if (res < 0) {
+			fprintf(stderr, "Failed read flag name (%i)\n", -res);
 			return res;
 		}
 		res = sd_bus_message_peek_type(m, &type, NULL);
@@ -81,6 +83,7 @@ static int parse_flags(sd_bus_message* m, struct Flags* flags, sd_bus_error*) {
 				return -EINVAL;
 			}
 			if (res < 0) {
+				fprintf(stderr, "Failed read offset value (%i)\n", -res);
 				return res;
 			}
 		} else if (strcasecmp(opt, "mtu") == 0) {
@@ -92,6 +95,7 @@ static int parse_flags(sd_bus_message* m, struct Flags* flags, sd_bus_error*) {
 				return -EINVAL;
 			}
 			if (res < 0) {
+				fprintf(stderr, "Failed read mtu value (%i)\n", -res);
 				return res;
 			}
 		} else if (strcasecmp(opt, "type") == 0) {
@@ -104,6 +108,7 @@ static int parse_flags(sd_bus_message* m, struct Flags* flags, sd_bus_error*) {
 				return -EINVAL;
 			}
 			if (res < 0) {
+				fprintf(stderr, "Failed read type value (%i)\n", -res);
 				return res;
 			}
 			if (strcasecmp(typename, "command") == 0) {
@@ -112,7 +117,7 @@ static int parse_flags(sd_bus_message* m, struct Flags* flags, sd_bus_error*) {
 				flags->reply = true;
 			}
 		} else {
-			printf("Unhandled flag: %s : %c\n", opt, type);
+			fprintf(stderr, "Unhandled flag: %s : %c\n", opt, type);
 			sd_bus_message_skip(m, NULL);
 		}
 
@@ -145,12 +150,14 @@ static int read_characteristic(sd_bus_message* m, void *userdata, sd_bus_error* 
 
 	res = parse_flags(m, &flags, error);
 	if (res < 0 || sd_bus_error_is_set(error)) {
+		fprintf(stderr, "Failed to parse flags for characteristic read (%i)\n", -res);
 		return res;
 	}
 
 	if (flags.offset > length) {
+		fprintf(stderr, "Invalid characteristic offset (%zu > %zu)\n", flags.offset, length);
 		return sd_bus_error_setf(error, "org.bluez.Error.InvalidOffset",
-			"Requested offset %lu exceeds characteristic size %zu", flags.offset, length);
+			"Requested offset %zu exceeds characteristic size %zu", flags.offset, length);
 	}
 	length -= flags.offset;
 	if (flags.mtu && length > flags.mtu) {
@@ -186,11 +193,13 @@ static int write_characteristic(sd_bus_message* m, void *userdata, sd_bus_error*
 
 	res = sd_bus_message_read_array(m, 'y', &data, &size);
 	if (res < 0) {
+		fprintf(stderr, "Failed to read data for characteristic write (%i)\n", -res);
 		return res;
 	}
 
 	res = parse_flags(m, &flags, error);
 	if (res < 0 || sd_bus_error_is_set(error)) {
+		fprintf(stderr, "Failed to parse flags for characteristic wr (%i)\n", -res);
 		return res;
 	}
 
@@ -259,10 +268,12 @@ static int read_descriptor(sd_bus_message* m, void *userdata, sd_bus_error* erro
 
 	res = parse_flags(m, &flags, error);
 	if (res < 0 || sd_bus_error_is_set(error)) {
+		fprintf(stderr, "Failed to parse flags for descriptor read (%i)\n", -res);
 		return res;
 	}
 
 	if (flags.offset > length) {
+		fprintf(stderr, "Invalid descriptor offset (%zu > %zu)\n", flags.offset, length);
 		return sd_bus_error_setf(error, "org.bluez.Error.InvalidOffset",
 			"Requested offset %lu exceeds descriptor size %zu", flags.offset, length);
 	}
