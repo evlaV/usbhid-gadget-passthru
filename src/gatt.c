@@ -116,6 +116,9 @@ static int parse_flags(sd_bus_message* m, struct Flags* flags, sd_bus_error*) {
 			} else if (strcasecmp(typename, "request") == 0) {
 				flags->reply = true;
 			}
+		} else if (strcasecmp(opt, "link") == 0) {
+			/* We don't care about this message */
+			sd_bus_message_skip(m, NULL);
 		} else {
 			fprintf(stderr, "Unhandled flag: %s : %c\n", opt, type);
 			sd_bus_message_skip(m, NULL);
@@ -145,6 +148,7 @@ static int read_characteristic(sd_bus_message* m, void *userdata, sd_bus_error* 
 	sd_bus_message* reply;
 
 	if (!(characteristic->flags & GATT_FLAG_READ)) {
+		fprintf(stderr, "Disallowed read to write-only characteristic (%s)\n", characteristic->uuid);
 		return sd_bus_error_set(error, "org.bluez.Error.NotSupported", "Reading not supported");
 	}
 
@@ -188,6 +192,7 @@ static int write_characteristic(sd_bus_message* m, void *userdata, sd_bus_error*
 	const void* data;
 
 	if (!(characteristic->flags & GATT_FLAG_WRITE)) {
+		fprintf(stderr, "Disallowed write to read-only characteristic (%s)\n", characteristic->uuid);
 		return sd_bus_error_set(error, "org.bluez.Error.NotSupported", "Writing not supported");
 	}
 
@@ -204,6 +209,7 @@ static int write_characteristic(sd_bus_message* m, void *userdata, sd_bus_error*
 	}
 
 	if (!flags.reply && !(characteristic->flags & GATT_FLAG_WRITE_NO_RESPONSE)) {
+		fprintf(stderr, "Disallowed write without response (%s)\n", characteristic->uuid);
 		return sd_bus_error_set(error, "org.bluez.Error.NotSupported", "Writing without response not supported");
 	}
 
@@ -211,7 +217,10 @@ static int write_characteristic(sd_bus_message* m, void *userdata, sd_bus_error*
 	if (res < 0) {
 		return res;
 	}
-	return sd_bus_reply_method_return(m, NULL);
+	if (flags.reply) {
+		return sd_bus_reply_method_return(m, NULL);
+	}
+	return 0;
 }
 
 static int acquire_notify(sd_bus_message* m, void *userdata, sd_bus_error* error) {
@@ -222,6 +231,7 @@ static int acquire_notify(sd_bus_message* m, void *userdata, sd_bus_error* error
 	sd_bus_message* reply;
 
 	if (!(characteristic->flags & GATT_FLAG_READ)) {
+		fprintf(stderr, "Disallowed acquire-notify for write-only characteristic (%s)\n", characteristic->uuid);
 		return sd_bus_error_set(error, "org.bluez.Error.NotSupported", "Reading not supported");
 	}
 
@@ -267,6 +277,7 @@ static int read_descriptor(sd_bus_message* m, void *userdata, sd_bus_error* erro
 	sd_bus_message* reply;
 
 	if (!(descriptor->flags & GATT_FLAG_READ)) {
+		fprintf(stderr, "Disallowed read from write-only descriptor (%s)\n", descriptor->uuid);
 		return sd_bus_error_set(error, "org.bluez.Error.NotSupported", "Reading not supported");
 	}
 
