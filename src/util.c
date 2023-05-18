@@ -7,6 +7,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include "log.h"
 #include "util.h"
 
 __attribute__((format(printf, 1, 3)))
@@ -39,20 +40,20 @@ bool cp_prop(const char* restrict indir, const char* inpath, const char* restric
 	outfd = vopen("%s/%s", O_WRONLY | O_TRUNC, 0644, outdir, outpath);
 
 	if (infd < 0) {
-		perror("Failed to open property input");
+		log_errno(WARN, "Failed to open property input");
 		close(outfd);
 		return false;
 	}
 
 	if (outfd < 0) {
-		perror("Failed to open property output");
+		log_errno(WARN, "Failed to open property output");
 		close(infd);
 		return false;
 	}
 
 	while ((size = read(infd, buf, sizeof(buf))) > 0) {
 		if (write(outfd, buf, size) != size) {
-			perror("Failed to copy property");
+			log_errno(WARN, "Failed to copy property");
 			close(infd);
 			close(outfd);
 			return false;
@@ -73,13 +74,13 @@ bool cp_prop_hex(const char* restrict indir, const char* inpath, const char* res
 	outfd = vopen("%s/%s", O_WRONLY | O_TRUNC, 0644, outdir, outpath);
 
 	if (infd < 0) {
-		perror("Failed to open property input");
+		log_errno(WARN, "Failed to open property input");
 		close(outfd);
 		return false;
 	}
 
 	if (outfd < 0) {
-		perror("Failed to open property output");
+		log_errno(WARN, "Failed to open property output");
 		close(infd);
 		return false;
 	}
@@ -88,7 +89,7 @@ bool cp_prop_hex(const char* restrict indir, const char* inpath, const char* res
 	buf[1] = 'x';
 	size = read(infd, &buf[2], sizeof(buf) - 2);
 	if (size < 1) {
-		perror("Failed to read property");
+		log_errno(WARN, "Failed to read property");
 		close(infd);
 		close(outfd);
 		return false;
@@ -96,7 +97,7 @@ bool cp_prop_hex(const char* restrict indir, const char* inpath, const char* res
 	size += 2;
 
 	if (write(outfd, buf, size) != size) {
-		perror("Failed to write property");
+		log_errno(WARN, "Failed to write property");
 		close(infd);
 		close(outfd);
 		return false;

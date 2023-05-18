@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: BSD-3-Clause */
 #include "dev.h"
+#include "log.h"
 #include "util.h"
 
 #include <dirent.h>
@@ -18,7 +19,7 @@ bool find_sysfs_path(const char* name, char* syspath, char* bus_id) {
 		snprintf(syspath_tmp, sizeof(syspath_tmp), "/sys/bus/usb/devices/%s", name);
 	}
 	if (realpath(syspath_tmp, syspath) == NULL) {
-		perror("Failed to resolve sysfs path");
+		log_errno(ERROR, "Failed to resolve sysfs path");
 		return false;
 	}
 	strncpy(bus_id, strrchr(syspath_tmp, '/') + 1, 15);
@@ -31,11 +32,11 @@ int interface_count(const char* syspath) {
 
 	fd = vopen("%s/bNumInterfaces", O_RDONLY, 0666, syspath);
 	if (fd < 0) {
-		perror("Failed to open interface count");
+		log_errno(ERROR, "Failed to open interface count");
 		return -1;
 	}
 	if (read(fd, tmp, sizeof(tmp)) < 0) {
-		perror("Failed to read interface count");
+		log_errno(ERROR, "Failed to read interface count");
 		return -1;
 	}
 	return strtoul(tmp, NULL, 10);
@@ -48,11 +49,11 @@ int interface_type(const char* syspath, const char* bus_id, int interface) {
 	snprintf(syspath_tmp, sizeof(syspath_tmp), "%s/%s:1.%u", syspath, bus_id, interface);
 	fd = vopen("%s/bInterfaceClass", O_RDONLY, 0666, syspath_tmp);
 	if (fd < 0) {
-		perror("Could not determine interface class");
+		log_errno(ERROR, "Could not determine interface class");
 		return fd;
 	}
 	if (read(fd, tmp, 3) != 3) {
-		perror("Could not determine interface class");
+		log_errno(ERROR, "Could not determine interface class");
 		close(fd);
 		return -1;
 	}

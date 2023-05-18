@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: BSD-3-Clause */
 #include "dev.h"
+#include "log.h"
 #include "util.h"
 
 #include <dirent.h>
@@ -16,7 +17,7 @@ bool find_function(const char* syspath, char* function, size_t function_size) {
 	struct dirent* dent;
 	dir = opendir(syspath);
 	if (!dir) {
-		perror("Failed to opendir function");
+		log_errno(ERROR, "Failed to opendir function");
 		return false;
 	}
 
@@ -40,7 +41,7 @@ int find_dev_node(unsigned nod_major, unsigned nod_minor, const char* prefix) {
 	struct stat nod;
 	dir = opendir("/dev");
 	if (!dir) {
-		perror("Failed to opendir /dev");
+		log_errno(ERROR, "Failed to opendir /dev");
 		return -1;
 	}
 
@@ -53,7 +54,7 @@ int find_dev_node(unsigned nod_major, unsigned nod_minor, const char* prefix) {
 		}
 		snprintf(nod_path, sizeof(nod_path), "/dev/%s", dent->d_name);
 		if (stat(nod_path, &nod) < 0) {
-			perror("Failed to stat dev node");
+			log_errno(ERROR, "Failed to stat dev node");
 			return -1;
 		}
 		if (major(nod.st_rdev) == nod_major && minor(nod.st_rdev) == nod_minor) {
@@ -73,11 +74,11 @@ int find_dev(const char* file, const char* class) {
 
 	int fd = open(file, O_RDONLY);
 	if (fd < 0) {
-		perror("Failed to open dev path");
+		log_errno(ERROR, "Failed to open dev path");
 		return -1;
 	}
 	if (read(fd, tmp, sizeof(tmp)) < 3) {
-		perror("Failed to read dev path");
+		log_errno(ERROR, "Failed to read dev path");
 		close(fd);
 		return -1;
 	}
@@ -101,7 +102,7 @@ bool find_dev_by_id(const char* vidpid, char* out) {
 
 	dir = opendir("/sys/bus/usb/devices");
 	if (!dir) {
-		perror("Failed to opendir usb/devices");
+		log_errno(ERROR, "Failed to opendir usb/devices");
 		return false;
 	}
 
@@ -160,7 +161,7 @@ int find_hidraw(const char* syspath) {
 	strncat(function, "/hidraw", sizeof(function));
 	dir = opendir(function);
 	if (!dir) {
-		perror("Failed to opendir hidraw");
+		log_errno(ERROR, "Failed to opendir hidraw");
 		return -1;
 	}
 

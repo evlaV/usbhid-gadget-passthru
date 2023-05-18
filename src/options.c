@@ -1,4 +1,5 @@
 /* SPDX-License-Identifier: BSD-3-Clause */
+#include "log.h"
 #include "options.h"
 
 #include <stddef.h>
@@ -13,7 +14,9 @@ bool getopt_parse(int argc, char* argv[], struct Options* opts) {
 	static const struct option long_flags[] = {
 		{"help", no_argument, 0, 'h'},
 		{"name", required_argument, 0, 'n'},
+		{"quiet", no_argument, 0, 'q'},
 		{"udc", required_argument, 0, 'u'},
+		{"verbose", no_argument, 0, 'v'},
 		{0}
 	};
 	int c;
@@ -27,8 +30,14 @@ bool getopt_parse(int argc, char* argv[], struct Options* opts) {
 		case 'n':
 			opts->name = strdup(optarg);
 			break;
+		case 'q':
+			set_log_level(ERROR);
+			break;
 		case 'u':
 			opts->udc = strdup(optarg);
+			break;
+		case 'v':
+			set_log_level(DEBUG);
 			break;
 		default:
 			return false;
@@ -65,7 +74,9 @@ void usage(const char* argv0, bool help) {
 	puts("\nOptions:");
 	puts(" -h, --help         Print out this help");
 	puts(" -n, --name NAME    Name of the passthru device, used in system paths");
+	puts(" -q, --quiet        Print less output");
 	puts(" -u, --udc UDC      Select which USB device controller to use for the gadget");
+	puts(" -v, --verbose      Print more output");
 	puts("\nThe device name may be either specified as a bus ID, as seen in "
 	     "/sys/bus/usb/devices, or a VID:PID combination, in which case the first device "
 	     "that matches that combination will be passed through.");

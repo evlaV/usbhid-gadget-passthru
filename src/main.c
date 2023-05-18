@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: BSD-3-Clause */
 #include "dev.h"
+#include "log.h"
 #include "options.h"
 #include "usb.h"
 #include "util.h"
@@ -44,20 +45,20 @@ bool create_configfs(const char* configfs, const char* syspath) {
 	size_t i;
 
 	if (mkdir(configfs, 0755) == -1 && errno != EEXIST) {
-		perror("Failed to make configfs directory");
+		log_errno(ERROR, "Failed to make configfs directory");
 		return false;
 	}
 
 	if (vmkdir("%s/configs/c.1", 0755, configfs) == -1 && errno != EEXIST) {
-		perror("Failed to make configfs configs directory");
+		log_errno(ERROR, "Failed to make configfs configs directory");
 		return false;
 	}
 	if (vmkdir("%s/strings/0x409", 0755, configfs) == -1 && errno != EEXIST) {
-		perror("Failed to make configfs strings directory");
+		log_errno(ERROR, "Failed to make configfs strings directory");
 		return false;
 	}
 	if (vmkdir("%s/configs/c.1/strings/0x409", 0755, configfs) == -1 && errno != EEXIST) {
-		perror("Failed to make configfs configs strings directory");
+		log_errno(ERROR, "Failed to make configfs configs strings directory");
 		return false;
 	}
 
@@ -92,11 +93,11 @@ bool create_configfs(const char* configfs, const char* syspath) {
 
 	infd = vopen("%s/version", O_RDONLY, 0666, syspath);
 	if (infd < 0) {
-		perror("Failed to open version input file");
+		log_errno(ERROR, "Failed to open version input file");
 		return false;
 	}
 	if (read(infd, tmp, sizeof(tmp)) < 0) {
-		perror("Failed to read version file");
+		log_errno(ERROR, "Failed to read version file");
 		close(infd);
 		return false;
 	}
@@ -112,11 +113,11 @@ bool create_configfs(const char* configfs, const char* syspath) {
 	tmp[2] = '0';
 	outfd = vopen("%s/bcdUSB", O_WRONLY, 0666, configfs);
 	if (outfd < 0) {
-		perror("Failed to open version output file");
+		log_errno(ERROR, "Failed to open version output file");
 		return false;
 	}
 	if (write(outfd, tmp, 7) != 7) {
-		perror("Failed to write version output file");
+		log_errno(ERROR, "Failed to write version output file");
 		close(outfd);
 		return false;
 	}
@@ -124,11 +125,11 @@ bool create_configfs(const char* configfs, const char* syspath) {
 
 	infd = vopen("%s/bMaxPower", O_RDONLY, 0666, syspath);
 	if (infd < 0) {
-		perror("Failed to open max power input file");
+		log_errno(ERROR, "Failed to open max power input file");
 		return false;
 	}
 	if (read(infd, tmp, sizeof(tmp)) < 0) {
-		perror("Failed to read max power file");
+		log_errno(ERROR, "Failed to read max power file");
 		close(infd);
 		return false;
 	}
@@ -150,11 +151,11 @@ bool create_configfs(const char* configfs, const char* syspath) {
 	}
 	outfd = vopen("%s/configs/c.1/MaxPower", O_WRONLY, 0666, configfs);
 	if (outfd < 0) {
-		perror("Failed to open max power output file");
+		log_errno(ERROR, "Failed to open max power output file");
 		return false;
 	}
 	if (write(outfd, tmp, strlen(tmp)) < 0) {
-		perror("Failed to write max power output file");
+		log_errno(ERROR, "Failed to write max power output file");
 		close(outfd);
 		return false;
 	}
@@ -173,7 +174,7 @@ bool create_configfs_function(const char* configfs, const char* syspath, int fn)
 
 	snprintf(function, sizeof(function), "%s/functions/hid.usb%d", configfs, fn);
 	if (mkdir(function, 0755) == -1 && errno != EEXIST) {
-		perror("Failed to make configfs function directory");
+		log_errno(ERROR, "Failed to make configfs function directory");
 		return false;
 	}
 
@@ -185,29 +186,29 @@ bool create_configfs_function(const char* configfs, const char* syspath, int fn)
 	}
 
 	if (!find_function(syspath, interface, sizeof(interface))) {
-		puts("Failed to find function");
+		log_fmt(ERROR, "Failed to find function\n");
 		return false;
 	}
 	infd = vopen("%s/report_descriptor", O_RDONLY, 0666, interface);
 	if (infd < 0) {
-		perror("Failed to open report descriptor input file");
+		log_errno(ERROR, "Failed to open report descriptor input file");
 		return false;
 	}
 
 	desc_size = read(infd, report_descriptor, sizeof(report_descriptor));
 	if (desc_size <= 0) {
-		perror("Failed to read report descriptor file");
+		log_errno(ERROR, "Failed to read report descriptor file");
 		return false;
 	}
 
 	outfd = vopen("%s/report_desc", O_WRONLY | O_TRUNC, 0666, function);
 	if (outfd < 0) {
-		perror("Failed to open report descriptor output file");
+		log_errno(ERROR, "Failed to open report descriptor output file");
 		return false;
 	}
 
 	if (write(outfd, report_descriptor, desc_size) != desc_size) {
-		perror("Failed to write report descriptor file");
+		log_errno(ERROR, "Failed to write report descriptor file");
 		close(outfd);
 		return false;
 	}
@@ -216,11 +217,11 @@ bool create_configfs_function(const char* configfs, const char* syspath, int fn)
 
 	outfd = vopen("%s/report_length", O_WRONLY | O_TRUNC, 0666, function);
 	if (outfd < 0) {
-		perror("Failed to open report length file");
+		log_errno(ERROR, "Failed to open report length file");
 		return false;
 	}
 	if (dprintf(outfd, "%02i", 64) < 2) {
-		perror("Failed to write report length file");
+		log_errno(ERROR, "Failed to write report length file");
 		close(outfd);
 		return false;
 	}
@@ -228,7 +229,7 @@ bool create_configfs_function(const char* configfs, const char* syspath, int fn)
 
 	snprintf(interface, sizeof(interface), "%s/configs/c.1/hid.usb%d", configfs, fn);
 	if (symlink(function, interface) < 0) {
-		perror("Failed to symlink interface config");
+		log_errno(ERROR, "Failed to symlink interface config");
 		return false;
 	}
 
@@ -241,7 +242,7 @@ bool find_udc(char* out) {
 
 	dir = opendir("/sys/class/udc");
 	if (!dir) {
-		perror("Failed to opendir udc");
+		log_errno(ERROR, "Failed to opendir udc");
 		return false;
 	}
 
@@ -259,11 +260,11 @@ bool find_udc(char* out) {
 bool start_udc(const char* configfs, const char* udc) {
 	int fd = vopen("%s/UDC", O_WRONLY | O_TRUNC, 0644, configfs);
 	if (fd < 0) {
-		perror("Failed to open UDC");
+		log_errno(ERROR, "Failed to open UDC");
 		return false;
 	}
 	if (dprintf(fd, "%s\n", udc) < 0) {
-		perror("Failed to start UDC");
+		log_errno(ERROR, "Failed to start UDC");
 		close(fd);
 		return false;
 	}
@@ -274,11 +275,11 @@ bool start_udc(const char* configfs, const char* udc) {
 bool stop_udc(const char* configfs) {
 	int fd = vopen("%s/UDC", O_WRONLY | O_TRUNC, 0644, configfs);
 	if (fd < 0) {
-		perror("Failed to open UDC");
+		log_errno(ERROR, "Failed to open UDC");
 		return false;
 	}
 	if (write(fd, "\n", 1) < 0) {
-		perror("Failed to stop UDC");
+		log_errno(ERROR, "Failed to stop UDC");
 		close(fd);
 		return false;
 	}
@@ -311,7 +312,7 @@ bool poll_fds(int* infds, int* outfds, nfds_t nfds) {
 		}
 		if (ret < 0) {
 			if (errno != EINTR) {
-				perror("Failed to poll nodes");
+				log_errno(ERROR, "Failed to poll nodes");
 			}
 			return did_hup;
 		}
@@ -321,17 +322,17 @@ bool poll_fds(int* infds, int* outfds, nfds_t nfds) {
 			}
 			if (fds[i].revents & POLLPRI) {
 				if (ioctl(fds[i].fd, GADGET_HID_READ_SET_REPORT, &set_report) < 0) {
-					perror("SET ioctl in failed");
+					log_errno(ERROR, "SET ioctl in failed");
 				}
 				if (ioctl(fds[i ^ 1].fd, HIDIOCSFEATURE(set_report.length), set_report.data) < 0) {
-					perror("SET ioctl out failed");
+					log_errno(ERROR, "SET ioctl out failed");
 				}
 				get_report.data[0] = set_report.data[0];
 				if (ioctl(fds[i ^ 1].fd, HIDIOCGFEATURE(64), get_report.data) < 0) {
-					perror("GET ioctl in failed");
+					log_errno(ERROR, "GET ioctl in failed");
 				}
 				if (get_report.data[0] == set_report.data[0] && ioctl(fds[i].fd, GADGET_HID_WRITE_GET_REPORT, &get_report) < 0) {
-					perror("GET ioctl out failed");
+					log_errno(ERROR, "GET ioctl out failed");
 				}
 				memset(get_report.data, 0, sizeof(get_report.data));
 				fds[i].revents &= ~POLLPRI;
@@ -347,7 +348,7 @@ bool poll_fds(int* infds, int* outfds, nfds_t nfds) {
 				sizein = read(fds[i].fd, buffer, sizeof(buffer));
 				if (sizein < 0) {
 					if (errno != EINTR) {
-						perror("Failed to read packet");
+						log_errno(ERROR, "Failed to read packet");
 					}
 					return did_hup;
 				}
@@ -359,7 +360,7 @@ bool poll_fds(int* infds, int* outfds, nfds_t nfds) {
 							break;
 						}
 						if (errno != EINTR) {
-							perror("Failed to write packet");
+							log_errno(ERROR, "Failed to write packet");
 						}
 						return did_hup;
 					}
@@ -433,7 +434,7 @@ int main(int argc, char* argv[]) {
 
 		snprintf(syspath_tmp, sizeof(syspath_tmp), "%s/%s:1.%u", syspath, bus_id, i);
 		if (!create_configfs_function(configfs, syspath_tmp, i)) {
-			perror("Could not create function");
+			log_errno(ERROR, "Could not create function");
 			goto shutdown;
 		}
 	}
@@ -441,7 +442,7 @@ int main(int argc, char* argv[]) {
 	if (opts.udc) {
 		strncpy(udc, opts.udc, sizeof(udc) - 1);
 	} else if (!find_udc(udc)) {
-		perror("Could not find UDC");
+		log_errno(ERROR, "Could not find UDC");
 		goto shutdown;
 	}
 
@@ -459,7 +460,7 @@ int main(int argc, char* argv[]) {
 		hidg[j] = find_dev(syspath_tmp, "hidg");
 		ret = fcntl(hidg[j], F_GETFL, 0);
 		if (ret < 0) {
-			perror("Failed to get dev flags");
+			log_errno(ERROR, "Failed to get dev flags");
 			goto late_shutdown;
 		}
 		fcntl(hidg[j], F_SETFL, ret | FNONBLOCK);
