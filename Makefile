@@ -40,9 +40,9 @@ src/usb.o: include/usb.h include/dev.h include/log.h include/util.h
 src/util.o: include/util.h include/log.h
 
 src/dbus.o: include/dbus.h
-src/gatt.o: include/dbus.h include/gatt.h
+src/gatt.o: include/gatt.h include/dbus.h include/log.h
 
-src/bt.o: include/dbus.h include/dev.h include/filter.h include/gatt.h include/options.h include/usb.h include/util.h
+src/bt.o: include/dbus.h include/dev.h include/filter.h include/gatt.h include/log.h include/options.h include/usb.h include/util.h
 src/udc.o: include/dev.h include/log.h include/options.h include/usb.h include/util.h
 
 include/gatt.h: include/dbus.h
