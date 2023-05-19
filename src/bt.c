@@ -215,6 +215,12 @@ static int feature_report(const void* data, unsigned size, size_t offset, unsign
 	} else {
 		memcpy((uint8_t*) iface->feature_report.data.data, (const uint8_t*) data + 1, size);
 	}
+	log_fmt(DEBUG, "Feature report data in: ");
+	unsigned i;
+	for (i = 0; i < iface->feature_report.data.size; ++i) {
+		log_fmt(DEBUG, " %02X", ((uint8_t*) iface->feature_report.data.data)[i]);
+	}
+	log_fmt(DEBUG, "\n");
 	if (size < mtu) {
 		int res;
 		res = ioctl(iface->fd, HIDIOCSFEATURE(offset + size), iface->feature_report.data.data);
@@ -227,6 +233,11 @@ static int feature_report(const void* data, unsigned size, size_t offset, unsign
 			perror("GET ioctl in failed");
 			return res;
 		}
+		log_fmt(DEBUG, "Feature report data out:");
+		for (i = 0; i < iface->feature_report.data.size; ++i) {
+			log_fmt(DEBUG, " %02X", ((uint8_t*) iface->feature_report.data.data)[i]);
+		}
+		log_fmt(DEBUG, "\n");
 	}
 
 	return 0;
@@ -306,6 +317,8 @@ void hogp_create_interface(struct HOGPInterface* iface) {
 void hogp_create(struct HOGPDevice* hog, const char* namespace, size_t nInterfaces) {
 	char path[PATH_MAX];
 	size_t i;
+
+	log_fmt(DEBUG, "Creating HID-Over-GATT profile device with %zu interfaces\n", nInterfaces);
 	hog->pnp_data.source = 2;
 	hog->appearance_data = htobs(GAP_GAMEPAD);
 	hog->battery_slot = NULL;

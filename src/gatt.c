@@ -87,6 +87,7 @@ static int parse_flags(sd_bus_message* m, struct Flags* flags, sd_bus_error*) {
 				log_fmt(WARN, "Failed read offset value (%i)\n", -res);
 				return res;
 			}
+			log_fmt(DEBUG, "offset flag: %zi\n", flags->offset);
 		} else if (strcasecmp(opt, "mtu") == 0) {
 			if (type == 'q') {
 				res = sd_bus_message_read(m, "q", &flags->mtu);
@@ -99,6 +100,7 @@ static int parse_flags(sd_bus_message* m, struct Flags* flags, sd_bus_error*) {
 				log_fmt(WARN, "Failed read mtu value (%i)\n", -res);
 				return res;
 			}
+			log_fmt(DEBUG, "offset mtu: %u\n", flags->mtu);
 		} else if (strcasecmp(opt, "type") == 0) {
 			const char* typename;
 			if (type == 's') {
@@ -116,7 +118,10 @@ static int parse_flags(sd_bus_message* m, struct Flags* flags, sd_bus_error*) {
 				flags->reply = false;
 			} else if (strcasecmp(typename, "request") == 0) {
 				flags->reply = true;
+			} else {
+				log_fmt(WARN, "Unhandled type flag: %s\n", typename);
 			}
+			log_fmt(DEBUG, "type flag: %s\n", typename);
 		} else if (strcasecmp(opt, "link") == 0) {
 			/* We don't care about this message */
 			sd_bus_message_skip(m, NULL);
@@ -148,6 +153,8 @@ static int read_characteristic(sd_bus_message* m, void *userdata, sd_bus_error* 
 	size_t length = characteristic->data.size;
 	sd_bus_message* reply;
 
+	log_fmt(DEBUG, "Got read-characteristic\n");
+
 	if (!(characteristic->flags & GATT_FLAG_READ)) {
 		log_fmt(WARN, "Disallowed read to write-only characteristic (%s)\n", characteristic->uuid);
 		return sd_bus_error_set(error, "org.bluez.Error.NotSupported", "Reading not supported");
@@ -174,6 +181,13 @@ static int read_characteristic(sd_bus_message* m, void *userdata, sd_bus_error* 
 		return res;
 	}
 
+	log_fmt(DEBUG, "read-characteristic data:");
+	unsigned i;
+	for (i = flags.offset; i < length; ++i) {
+		log_fmt(DEBUG, " %02X", ((uint8_t*) characteristic->data.data)[i]);
+	}
+	log_fmt(DEBUG, "\n");
+
 	res = sd_bus_message_append_array(reply, 'y', &((uint8_t*) characteristic->data.data)[flags.offset], length);
 	if (res < 0) {
 		return res;
@@ -191,6 +205,8 @@ static int write_characteristic(sd_bus_message* m, void *userdata, sd_bus_error*
 	};
 	size_t size;
 	const void* data;
+
+	log_fmt(DEBUG, "Got write-characteristic\n");
 
 	if (!(characteristic->flags & GATT_FLAG_WRITE)) {
 		log_fmt(WARN, "Disallowed write to read-only characteristic (%s)\n", characteristic->uuid);
@@ -230,6 +246,8 @@ static int acquire_notify(sd_bus_message* m, void *userdata, sd_bus_error* error
 	struct Flags flags = {.mtu = 517};
 	int fds[2];
 	sd_bus_message* reply;
+
+	log_fmt(DEBUG, "Got acquire-notify\n");
 
 	if (!(characteristic->flags & GATT_FLAG_READ)) {
 		log_fmt(WARN, "Disallowed acquire-notify for write-only characteristic (%s)\n", characteristic->uuid);
@@ -276,6 +294,8 @@ static int read_descriptor(sd_bus_message* m, void *userdata, sd_bus_error* erro
 	struct Flags flags = {.mtu = 517};
 	size_t length = descriptor->data.size;
 	sd_bus_message* reply;
+
+	log_fmt(DEBUG, "Got read-descriptor\n");
 
 	if (!(descriptor->flags & GATT_FLAG_READ)) {
 		log_fmt(WARN, "Disallowed read from write-only descriptor (%s)\n", descriptor->uuid);
