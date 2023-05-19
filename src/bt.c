@@ -3,6 +3,7 @@
 #include "dev.h"
 #include "filter.h"
 #include "gatt.h"
+#include "log.h"
 #include "options.h"
 #include "usb.h"
 #include "util.h"
@@ -147,7 +148,7 @@ static const sd_bus_vtable gatt_profile[] = {
 
 static int register_application_cb(sd_bus_message*, void*, sd_bus_error* error) {
 	if (sd_bus_error_is_set(error)) {
-		printf("Failed to register application: %s\n", error->message);
+		log_fmt(ERROR, "Failed to register application: %s\n", error->message);
 		sd_bus_error_free(error);
 		did_error = true;
 		did_hup = true;
@@ -157,7 +158,7 @@ static int register_application_cb(sd_bus_message*, void*, sd_bus_error* error) 
 
 static int register_advert_cb(sd_bus_message*, void*, sd_bus_error* error) {
 	if (sd_bus_error_is_set(error)) {
-		printf("Failed to register advertisement: %s\n", error->message);
+		log_fmt(ERROR, "Failed to register advertisement: %s\n", error->message);
 		sd_bus_error_free(error);
 		did_error = true;
 		did_hup = true;
@@ -415,27 +416,27 @@ int hogp_register(struct HOGPDevice* hog, sd_bus* bus) {
 
 	res = gatt_service_register(&hog->devinfo, bus);
 	if (res < 0) {
-		printf("Failed to publish device info service: %s\n", strerror(-res));
+		log_fmt(ERROR, "Failed to publish device info service: %s\n", strerror(-res));
 		return res;
 	}
 
 	res = gatt_service_register(&hog->battery, bus);
 	if (res < 0) {
-		printf("Failed to publish battery service: %s\n", strerror(-res));
+		log_fmt(ERROR, "Failed to publish battery service: %s\n", strerror(-res));
 		return res;
 	}
 
 	for (i = 0; i < hog->nInterfaces; ++i) {
 		res = gatt_service_register(&hog->interface[i].hid, bus);
 		if (res < 0) {
-			printf("Failed to publish HID service: %s\n", strerror(-res));
+			log_fmt(ERROR, "Failed to publish HID service: %s\n", strerror(-res));
 			return res;
 		}
 	}
 
 	res = sd_bus_match_signal_async(bus, &hog->battery_slot, "org.freedesktop.UPower", hog->battery_path, "org.freedesktop.DBus.Properties", "PropertiesChanged", hogp_update_battery, NULL, hog);
 	if (res < 0) {
-		printf("Failed to subscribe to battery updates: %s\n", strerror(-res));
+		log_fmt(WARN, "Failed to subscribe to battery updates: %s\n", strerror(-res));
 		/* This is a non-fatal error, so don't return failure */
 	}
 	return 0;
@@ -529,7 +530,7 @@ bool poll_fds(sd_bus* bus, struct HOGPDevice* dev) {
 		if (do_process) {
 			res = sd_bus_process(bus, NULL);
 			if (res < 0) {
-				printf("Failed to process bus: %s\n", strerror(-res));
+				log_fmt(ERROR, "Failed to process bus: %s\n", strerror(-res));
 				break;
 			}
 
@@ -542,7 +543,7 @@ bool poll_fds(sd_bus* bus, struct HOGPDevice* dev) {
 
 		res = sd_bus_wait(bus, 1);
 		if (res < 0 && res != -EINTR) {
-			printf("Failed to wait on bus: %s\n", strerror(-res));
+			log_fmt(ERROR, "Failed to wait on bus: %s\n", strerror(-res));
 			return false;
 		}
 		if (res > 0) {
@@ -740,7 +741,7 @@ int main(int argc, char* argv[]) {
 
 	res = sd_bus_open_system(&bus);
 	if (res < 0) {
-		printf("Failed to connect to system D-Bus: %s\n", strerror(-res));
+		log_fmt(ERROR, "Failed to connect to system D-Bus: %s\n", strerror(-res));
 		goto shutdown;
 	}
 
@@ -753,7 +754,7 @@ int main(int argc, char* argv[]) {
 	res = sd_bus_add_object_vtable(bus, &profile_slot, dbus_path,
 		 "org.bluez.GattProfile1", gatt_profile, profile);
 	if (res < 0) {
-		printf("Failed to publish profile: %s\n", strerror(-res));
+		log_fmt(ERROR, "Failed to publish profile: %s\n", strerror(-res));
 		goto shutdown;
 	}
 
@@ -771,7 +772,7 @@ int main(int argc, char* argv[]) {
 
 	res = hogp_register(&hog, bus);
 	if (res < 0) {
-		printf("Failed to publish HOGP: %s\n", strerror(-res));
+		log_fmt(ERROR, "Failed to publish HOGP: %s\n", strerror(-res));
 		goto shutdown;
 	}
 
@@ -779,27 +780,27 @@ int main(int argc, char* argv[]) {
 	res = sd_bus_add_object_vtable(bus, &advert_slot, dbus_path,
 		 "org.bluez.LEAdvertisement1", le_advertisement, &advertisement);
 	if (res < 0) {
-		printf("Failed to publish advertisement: %s\n", strerror(-res));
+		log_fmt(ERROR, "Failed to publish advertisement: %s\n", strerror(-res));
 		goto shutdown;
 	}
 
 	res = sd_bus_add_object_manager(bus, &object_manager_slot, dbus_path);
 	if (res < 0) {
-		printf("Failed to add object manager: %s\n", strerror(-res));
+		log_fmt(ERROR, "Failed to add object manager: %s\n", strerror(-res));
 		goto shutdown;
 	}
 
 	res = sd_bus_call_method_async(bus, &register_advert_slot, "org.bluez", gatt_manager, "org.bluez.LEAdvertisingManager1",
 		"RegisterAdvertisement", register_advert_cb, &advertisement, "oa{sv}", dbus_path, 0, NULL);
 	if (res < 0) {
-		printf("Failed to register advertisement: %s\n", error.message);
+		log_fmt(ERROR, "Failed to register advertisement: %s\n", error.message);
 		goto shutdown;
 	}
 
 	res = sd_bus_call_method_async(bus, &register_service_slot, "org.bluez", gatt_manager, "org.bluez.GattManager1",
 		"RegisterApplication", register_application_cb, NULL, "oa{sv}", dbus_path, 0, NULL);
 	if (res < 0) {
-		printf("Failed to register application: %s\n", strerror(-res));
+		log_fmt(ERROR, "Failed to register application: %s\n", strerror(-res));
 		goto shutdown;
 	}
 
@@ -811,7 +812,7 @@ int main(int argc, char* argv[]) {
 	sigaction(SIGHUP, &sa, NULL);
 
 	if (sd_bus_get_unique_name(bus, &name) == 0) {
-		printf("name: %s\n", name);
+		log_fmt(INFO, "D-Bus name: %s\n", name);
 	}
 
 	ok = !poll_fds(bus, &hog);

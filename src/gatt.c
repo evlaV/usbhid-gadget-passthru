@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: BSD-3-Clause */
 #include "dbus.h"
 #include "gatt.h"
+#include "log.h"
 
 #include <dirent.h>
 #include <errno.h>
@@ -59,7 +60,7 @@ static int parse_flags(sd_bus_message* m, struct Flags* flags, sd_bus_error*) {
 
 	res = sd_bus_message_enter_container(m, 'a', "{sv}");
 	if (res < 0) {
-		fprintf(stderr, "Failed to enter flags container (%i)\n", -res);
+		log_fmt(WARN, "Failed to enter flags container (%i)\n", -res);
 		return res;
 	}
 
@@ -67,7 +68,7 @@ static int parse_flags(sd_bus_message* m, struct Flags* flags, sd_bus_error*) {
 		char type;
 		res = sd_bus_message_read(m, "s", &opt);
 		if (res < 0) {
-			fprintf(stderr, "Failed read flag name (%i)\n", -res);
+			log_fmt(WARN, "Failed read flag name (%i)\n", -res);
 			return res;
 		}
 		res = sd_bus_message_peek_type(m, &type, NULL);
@@ -83,7 +84,7 @@ static int parse_flags(sd_bus_message* m, struct Flags* flags, sd_bus_error*) {
 				return -EINVAL;
 			}
 			if (res < 0) {
-				fprintf(stderr, "Failed read offset value (%i)\n", -res);
+				log_fmt(WARN, "Failed read offset value (%i)\n", -res);
 				return res;
 			}
 		} else if (strcasecmp(opt, "mtu") == 0) {
@@ -95,7 +96,7 @@ static int parse_flags(sd_bus_message* m, struct Flags* flags, sd_bus_error*) {
 				return -EINVAL;
 			}
 			if (res < 0) {
-				fprintf(stderr, "Failed read mtu value (%i)\n", -res);
+				log_fmt(WARN, "Failed read mtu value (%i)\n", -res);
 				return res;
 			}
 		} else if (strcasecmp(opt, "type") == 0) {
@@ -108,7 +109,7 @@ static int parse_flags(sd_bus_message* m, struct Flags* flags, sd_bus_error*) {
 				return -EINVAL;
 			}
 			if (res < 0) {
-				fprintf(stderr, "Failed read type value (%i)\n", -res);
+				log_fmt(WARN, "Failed read type value (%i)\n", -res);
 				return res;
 			}
 			if (strcasecmp(typename, "command") == 0) {
@@ -120,7 +121,7 @@ static int parse_flags(sd_bus_message* m, struct Flags* flags, sd_bus_error*) {
 			/* We don't care about this message */
 			sd_bus_message_skip(m, NULL);
 		} else {
-			fprintf(stderr, "Unhandled flag: %s : %c\n", opt, type);
+			log_fmt(DEBUG, "Unhandled flag: %s : %c\n", opt, type);
 			sd_bus_message_skip(m, NULL);
 		}
 
@@ -148,18 +149,18 @@ static int read_characteristic(sd_bus_message* m, void *userdata, sd_bus_error* 
 	sd_bus_message* reply;
 
 	if (!(characteristic->flags & GATT_FLAG_READ)) {
-		fprintf(stderr, "Disallowed read to write-only characteristic (%s)\n", characteristic->uuid);
+		log_fmt(WARN, "Disallowed read to write-only characteristic (%s)\n", characteristic->uuid);
 		return sd_bus_error_set(error, "org.bluez.Error.NotSupported", "Reading not supported");
 	}
 
 	res = parse_flags(m, &flags, error);
 	if (res < 0 || sd_bus_error_is_set(error)) {
-		fprintf(stderr, "Failed to parse flags for characteristic read (%i)\n", -res);
+		log_fmt(WARN, "Failed to parse flags for characteristic read (%i)\n", -res);
 		return res;
 	}
 
 	if (flags.offset > length) {
-		fprintf(stderr, "Invalid characteristic offset (%zu > %zu)\n", flags.offset, length);
+		log_fmt(WARN, "Invalid characteristic offset (%zu > %zu)\n", flags.offset, length);
 		return sd_bus_error_setf(error, "org.bluez.Error.InvalidOffset",
 			"Requested offset %zu exceeds characteristic size %zu", flags.offset, length);
 	}
@@ -192,24 +193,24 @@ static int write_characteristic(sd_bus_message* m, void *userdata, sd_bus_error*
 	const void* data;
 
 	if (!(characteristic->flags & GATT_FLAG_WRITE)) {
-		fprintf(stderr, "Disallowed write to read-only characteristic (%s)\n", characteristic->uuid);
+		log_fmt(WARN, "Disallowed write to read-only characteristic (%s)\n", characteristic->uuid);
 		return sd_bus_error_set(error, "org.bluez.Error.NotSupported", "Writing not supported");
 	}
 
 	res = sd_bus_message_read_array(m, 'y', &data, &size);
 	if (res < 0) {
-		fprintf(stderr, "Failed to read data for characteristic write (%i)\n", -res);
+		log_fmt(WARN, "Failed to read data for characteristic write (%i)\n", -res);
 		return res;
 	}
 
 	res = parse_flags(m, &flags, error);
 	if (res < 0 || sd_bus_error_is_set(error)) {
-		fprintf(stderr, "Failed to parse flags for characteristic wr (%i)\n", -res);
+		log_fmt(WARN, "Failed to parse flags for characteristic wr (%i)\n", -res);
 		return res;
 	}
 
 	if (!flags.reply && !(characteristic->flags & GATT_FLAG_WRITE_NO_RESPONSE)) {
-		fprintf(stderr, "Disallowed write without response (%s)\n", characteristic->uuid);
+		log_fmt(WARN, "Disallowed write without response (%s)\n", characteristic->uuid);
 		return sd_bus_error_set(error, "org.bluez.Error.NotSupported", "Writing without response not supported");
 	}
 
@@ -231,7 +232,7 @@ static int acquire_notify(sd_bus_message* m, void *userdata, sd_bus_error* error
 	sd_bus_message* reply;
 
 	if (!(characteristic->flags & GATT_FLAG_READ)) {
-		fprintf(stderr, "Disallowed acquire-notify for write-only characteristic (%s)\n", characteristic->uuid);
+		log_fmt(WARN, "Disallowed acquire-notify for write-only characteristic (%s)\n", characteristic->uuid);
 		return sd_bus_error_set(error, "org.bluez.Error.NotSupported", "Reading not supported");
 	}
 
@@ -277,18 +278,18 @@ static int read_descriptor(sd_bus_message* m, void *userdata, sd_bus_error* erro
 	sd_bus_message* reply;
 
 	if (!(descriptor->flags & GATT_FLAG_READ)) {
-		fprintf(stderr, "Disallowed read from write-only descriptor (%s)\n", descriptor->uuid);
+		log_fmt(WARN, "Disallowed read from write-only descriptor (%s)\n", descriptor->uuid);
 		return sd_bus_error_set(error, "org.bluez.Error.NotSupported", "Reading not supported");
 	}
 
 	res = parse_flags(m, &flags, error);
 	if (res < 0 || sd_bus_error_is_set(error)) {
-		fprintf(stderr, "Failed to parse flags for descriptor read (%i)\n", -res);
+		log_fmt(WARN, "Failed to parse flags for descriptor read (%i)\n", -res);
 		return res;
 	}
 
 	if (flags.offset > length) {
-		fprintf(stderr, "Invalid descriptor offset (%zu > %zu)\n", flags.offset, length);
+		log_fmt(WARN, "Invalid descriptor offset (%zu > %zu)\n", flags.offset, length);
 		return sd_bus_error_setf(error, "org.bluez.Error.InvalidOffset",
 			"Requested offset %lu exceeds descriptor size %zu", flags.offset, length);
 	}
