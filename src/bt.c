@@ -601,9 +601,13 @@ bool poll_fds(sd_bus* bus, struct HOGPDevice* dev) {
 				if ((size_t) sizein > dev->interface[i].input_buffer.size) {
 					buffer_realloc(&dev->interface[i].input_buffer, sizein);
 				}
-				if (is_deck && i == DECK_RAW_IFACE) {
+				if (!do_flush && is_deck && i == DECK_RAW_IFACE) {
 					flush_this = filter_update(&deck_filter, dev->interface[i].input_buffer.data, buffer, sizein);
-				} else {
+					if (flush_this) {
+						last_flush = timestamp;
+					}
+				}
+				if (flush_this) {
 					memcpy(dev->interface[i].input_buffer.data, buffer, sizein);
 				}
 				dev->interface[i].input_offset = sizein;
