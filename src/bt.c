@@ -53,7 +53,8 @@
 #define DESCRIPTOR_SIZE_MAX 4096
 #define REPORT_SIZE_MAX 512
 #define INTERFACES_MAX 8
-#define FLUSH_INTERVAL 24000000ULL
+#define FLUSH_INTERVAL 250000000ULL
+#define FLUSH_THROTTLE  20000000ULL
 
 bool did_hup = false;
 bool did_error = false;
@@ -579,6 +580,7 @@ bool poll_fds(sd_bus* bus, struct HOGPDevice* dev) {
 		timestamp = ts.tv_sec * 1000000000ULL + ts.tv_nsec;
 		do_flush = timestamp - last_flush >= FLUSH_INTERVAL;
 		if (do_flush) {
+			log_fmt(DEBUG, "Timeout triggering flush\n");
 			last_flush = timestamp;
 		}
 
@@ -604,29 +606,39 @@ bool poll_fds(sd_bus* bus, struct HOGPDevice* dev) {
 				if (!do_flush && is_deck && i == DECK_RAW_IFACE) {
 					flush_this = filter_update(&deck_filter, dev->interface[i].input_buffer.data, buffer, sizein);
 					if (flush_this) {
-						last_flush = timestamp;
+						log_fmt(DEBUG, "Filter triggering flush on interface %zu\n", i);
+						if (timestamp - last_flush < FLUSH_THROTTLE) {
+							log_fmt(DEBUG, "Flushing too fast, throttling...\n");
+							flush_this = false;
+						} else {
+							last_flush = timestamp;
+						}
 					}
 				}
 				if (flush_this) {
 					memcpy(dev->interface[i].input_buffer.data, buffer, sizein);
 				}
 				dev->interface[i].input_offset = sizein;
+			} else if (is_deck && i == DECK_RAW_IFACE) {
+				flush_this = do_flush;
 			}
 
 			sizein = dev->interface[i].input_offset;
-			if ((flush_this || do_flush) && sizein) {
-				dev->interface[i].input_offset = 0;
-				res = write(dev->interface[i].input_report.notify_fd, dev->interface[i].input_buffer.data, sizein);
-				if (res < 0) {
-					if (errno == EAGAIN) {
-						continue;
-					}
-					if (errno != EINTR) {
-						perror("Failed to write packet");
-					}
-					return did_hup;
-				}
+			if (!sizein || !(flush_this || do_flush)) {
+				continue;
 			}
+			res = write(dev->interface[i].input_report.notify_fd, dev->interface[i].input_buffer.data, sizein);
+			if (res < 0) {
+				if (errno == EAGAIN) {
+					continue;
+				}
+				if (errno != EINTR) {
+					perror("Failed to write packet");
+				}
+				return did_hup;
+			}
+			dev->interface[i].input_offset = 0;
+			log_fmt(DEBUG, "Flushed interface %zu\n", i);
 		}
 	}
 	return true;
