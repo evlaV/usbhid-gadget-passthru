@@ -4,7 +4,7 @@
 #include <stdarg.h>
 #include <stdio.h>
 
-static int _level = DEBUG;
+static int _level = INFO;
 
 __attribute__((format(printf, 2, 3)))
 void log_fmt(enum LogLevel level, const char* fmt, ...) {
