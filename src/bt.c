@@ -211,11 +211,7 @@ static int feature_report(const void* data, unsigned size, size_t offset, unsign
 	if (offset >= iface->feature_report.data.size || offset + size > iface->feature_report.data.size || size > iface->feature_report.data.size) {
 		return -ENOSPC;
 	}
-	if (offset) {
-		memcpy((uint8_t*) iface->feature_report.data.data + offset, data, size);
-	} else {
-		memcpy((uint8_t*) iface->feature_report.data.data, (const uint8_t*) data + 1, size);
-	}
+	memcpy((uint8_t*) iface->feature_report.data.data + offset, data, size);
 	log_fmt(DEBUG, "Feature report data in: ");
 	unsigned i;
 	for (i = 0; i < iface->feature_report.data.size; ++i) {
