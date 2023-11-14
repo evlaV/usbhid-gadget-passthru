@@ -603,24 +603,24 @@ bool poll_fds(sd_bus* bus, struct HOGPDevice* dev) {
 					flush_this = filter_update(&deck_filter, dev->interface[i].input_buffer.data, buffer, sizein);
 					if (flush_this) {
 						log_fmt(DEBUG, "Filter triggering flush on interface %zu\n", i);
-						if (timestamp - last_flush < FLUSH_THROTTLE) {
-							log_fmt(DEBUG, "Flushing too fast, throttling...\n");
-							flush_this = false;
-						} else {
-							last_flush = timestamp;
-						}
 					}
 				}
 				if (flush_this) {
-					memcpy(dev->interface[i].input_buffer.data, buffer, sizein);
+					if (timestamp - last_flush < FLUSH_THROTTLE) {
+						log_fmt(DEBUG, "Flushing too fast, throttling...\n");
+						flush_this = false;
+					} else {
+						last_flush = timestamp;
+						memcpy(dev->interface[i].input_buffer.data, buffer, sizein);
+					}
 				}
 				dev->interface[i].input_offset = sizein;
-			} else if (is_deck && i == DECK_RAW_IFACE) {
+			} else {
 				flush_this = do_flush;
 			}
 
 			sizein = dev->interface[i].input_offset;
-			if (!sizein || !(flush_this || do_flush)) {
+			if (!sizein || !flush_this) {
 				continue;
 			}
 			res = write(dev->interface[i].input_report.notify_fd, dev->interface[i].input_buffer.data, sizein);
