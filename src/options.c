@@ -10,7 +10,7 @@
 static char* default_name = "passthru";
 
 bool getopt_parse(int argc, char* argv[], struct Options* opts) {
-	static const char* flags = "hn:u:";
+	static const char* flags = "hn:qu:v";
 	static const struct option long_flags[] = {
 		{"help", no_argument, 0, 'h'},
 		{"name", required_argument, 0, 'n'},
