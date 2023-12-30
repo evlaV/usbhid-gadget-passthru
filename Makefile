@@ -19,7 +19,7 @@ OBJS=\
 .PHONY: clean install
 
 clean:
-	rm usbhid-gadget-passthru $(OBJS)
+	rm -f usbhid-gadget-passthru $(OBJS)
 
 install: all
 	install -Ds -m755 -t "$(DESTDIR)/usr/bin" usbhid-gadget-passthru
