@@ -28,6 +28,14 @@ bool getopt_parse(int argc, char* argv[], struct Options* opts) {
 			opts->usage = true;
 			return true;
 		case 'n':
+			if (strchr(optarg, '/')) {
+				log_fmt(ERROR, "Passthru name cannot include /\n");
+				return false;
+			}
+			if (optarg[0] == '.') {
+				log_fmt(ERROR, "Passthru name cannot start with .\n");
+				return false;
+			}
 			opts->name = strdup(optarg);
 			break;
 		case 'q':
