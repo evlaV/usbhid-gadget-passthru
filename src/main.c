@@ -392,21 +392,21 @@ int main(int argc, char* argv[]) {
 
 	if (!getopt_parse(argc, argv, &opts)) {
 		usage(argv[0], false);
-		goto shutdown;
+		goto early_shutdown;
 	}
 	if (opts.usage) {
 		usage(argv[0], true);
-		getopt_free(&opts);
-		return 0;
+		ok = 0;
+		goto early_shutdown;
 	}
 
 	if (!find_sysfs_path(opts.dev, syspath, bus_id)) {
-		goto shutdown;
+		goto early_shutdown;
 	}
 
 	max_interfaces = interface_count(syspath);
 	if (max_interfaces < 0) {
-		goto shutdown;
+		goto early_shutdown;
 	}
 
 	if (max_interfaces > INTERFACES_MAX) {
@@ -509,6 +509,7 @@ shutdown:
 	snprintf(syspath_tmp, sizeof(syspath_tmp), "%s/configs/c.1", configfs);
 	rmdir(syspath_tmp);
 	rmdir(configfs);
+early_shutdown:
 	getopt_free(&opts);
 	return ok;
 }
