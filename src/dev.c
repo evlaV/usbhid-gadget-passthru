@@ -158,7 +158,7 @@ int find_hidraw(const char* syspath) {
 	if (!find_function(syspath, function, sizeof(function))) {
 		return -1;
 	}
-	strncat(function, "/hidraw", sizeof(function));
+	strncat(function, "/hidraw", sizeof(function) - strlen(function) - 1);
 	dir = opendir(function);
 	if (!dir) {
 		log_errno(ERROR, "Failed to opendir hidraw");

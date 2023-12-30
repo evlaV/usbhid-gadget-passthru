@@ -427,6 +427,9 @@ int main(int argc, char* argv[]) {
 
 	for (i = 0; i < max_interfaces; ++i) {
 		int type = interface_type(syspath, bus_id, i);
+		hidg[i] = -1;
+		hidraw[i] = -1;
+
 		is_hid[i] = type == 3;
 		if (!is_hid[i]) {
 			continue;
@@ -452,8 +455,6 @@ int main(int argc, char* argv[]) {
 
 	for (i = 0, j = 0; i < max_interfaces; ++i) {
 		if (!is_hid[i]) {
-			hidg[j] = -1;
-			hidraw[j] = -1;
 			continue;
 		}
 		snprintf(syspath_tmp, sizeof(syspath_tmp), "%s/functions/hid.usb%u/dev", configfs, i);
