@@ -56,6 +56,14 @@ bool getopt_parse(int argc, char* argv[], struct Options* opts) {
 		puts("Missing device name");
 		return false;
 	}
+	if (strchr(argv[optind], '/')) {
+		log_fmt(ERROR, "Device name cannot include /\n");
+		return false;
+	}
+	if (argv[optind][0] == '.') {
+		log_fmt(ERROR, "Device name cannot start with .\n");
+		return false;
+	}
 	opts->dev = strdup(argv[optind]);
 
 	return true;
