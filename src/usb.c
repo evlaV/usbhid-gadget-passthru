@@ -37,8 +37,10 @@ int interface_count(const char* syspath) {
 	}
 	if (read(fd, tmp, sizeof(tmp)) < 0) {
 		log_errno(ERROR, "Failed to read interface count");
+		close(fd);
 		return -1;
 	}
+	close(fd);
 	return strtoul(tmp, NULL, 10);
 }
 
