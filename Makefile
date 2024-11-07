@@ -3,7 +3,7 @@ all: usbhid-gadget-passthru
 CFLAGS += -Wall -Wextra -Werror -Wno-format-truncation -Wno-stringop-overflow -Iinclude
 
 ifeq ($(DEBUG),)
-  CFLAGS += -O2 -D_FORTIFY_SOURCE=2
+  CFLAGS += -O2
 else
   CFLAGS += -g
 endif
