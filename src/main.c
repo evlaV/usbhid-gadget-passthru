@@ -34,7 +34,7 @@ struct usb_hidg_report {
 
 bool did_hup = false;
 
-void hup() {
+void hup(int) {
 	did_hup = true;
 }
 
