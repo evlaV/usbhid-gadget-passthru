@@ -59,7 +59,7 @@
 bool did_hup = false;
 bool did_error = false;
 
-void hup() {
+void hup(int) {
 	did_hup = true;
 }
 
